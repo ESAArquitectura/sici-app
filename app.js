@@ -96,6 +96,8 @@ function decir(e) {
   if (/User already registered/i.test(m)) return "Ese correo ya tiene acceso. Entre con su contraseña o pida un enlace.";
   if (/rate limit|security purposes/i.test(m)) return "Se pidieron demasiados correos seguidos. Espere unos minutos e intente de nuevo.";
   if (/Password should be/i.test(m)) return "La contraseña debe tener al menos 6 caracteres.";
+  if (/should be different from the old/i.test(m)) return "La contraseña nueva debe ser distinta de la anterior.";
+  if (/Auth session missing|expired|invalid.*(token|link)/i.test(m)) return "El enlace ya no sirve. Pida otro con «Olvidé mi contraseña».";
   if (/duplicate key.*codigo/i.test(m)) return "Ya existe un proyecto con ese código.";
   if (/duplicate key.*correo/i.test(m)) return "Ya hay una persona con ese correo.";
   if (/duplicate key/i.test(m)) return "Eso ya estaba registrado.";
@@ -130,6 +132,11 @@ const bien = texto => ({ tipo: "bien", texto });
 const mal = e => ({ tipo: "error", texto: decir(e) });
 
 // ---------- entrar ----------
+// Un campo de contraseña con el botón para verla mientras se escribe.
+const campoClave = (id, nombre, etiqueta, auto) => `<label for="${id}">${etiqueta}</label><div class="clave">
+  <input id="${id}" name="${nombre}" type="password" autocomplete="${auto}" minlength="6" required autocapitalize="off" spellcheck="false">
+  <button type="button" class="ver-clave" data-accion="verClave" data-para="${id}" aria-pressed="false" aria-label="Mostrar la contraseña">Ver</button></div>`;
+let recuperando = false;   // llegó desde el correo para cambiar la contraseña
 function vistaEntrar(modo = "entrar") {
   const primera = modo === "crear";
   pinta(`<main><div class="entrada">
@@ -138,14 +145,32 @@ function vistaEntrar(modo = "entrar") {
     <p style="color:var(--tinta-3)">${primera ? "Use el mismo correo con el que dirección lo agregó al equipo. Le llegará un mensaje para confirmarlo." : "Con el correo que dirección registró para usted."}</p>
     <form data-form="${primera ? "crear" : "entrar"}">
       <label for="correo">Correo</label><input id="correo" name="correo" type="email" autocomplete="email" inputmode="email" required>
-      <label for="clave">Contraseña</label><input id="clave" name="clave" type="password" autocomplete="${primera ? "new-password" : "current-password"}" minlength="6" required>
+      ${campoClave("clave", "clave", "Contraseña", primera ? "new-password" : "current-password")}
       <button class="btn">${primera ? "Crear mi acceso" : "Entrar"}</button>
     </form>
     <button class="enlace" data-accion="${primera ? "modoEntrar" : "modoCrear"}">${primera ? "Ya tengo acceso" : "Es mi primera vez"}</button><br>
-    ${primera ? "" : '<button class="enlace" data-accion="enlace">Entrar con un enlace que me llegue al correo</button>'}
+    ${primera ? "" : '<button class="enlace" data-accion="recuperar">Olvidé mi contraseña</button><br><button class="enlace" data-accion="enlace">Entrar con un enlace que me llegue al correo</button>'}
   </div></main>`);
 }
+// Contraseña nueva: llega desde el correo de recuperación o desde Mi cuenta.
+function vistaNuevaClave() {
+  pinta(`${recuperando ? "" : cabecera("Cambiar mi contraseña", { atras: "#/yo" })}<main><div class="${recuperando ? "entrada" : ""}">
+    ${recuperando ? '<picture class="logo"><source srcset="logo-blanco.png" media="(prefers-color-scheme: dark)"><img src="logo.png" width="1000" height="431" alt="ESA Arquitectura"></picture><div class="sub">SICI · CONTROL INTERNO</div><h1>Nueva contraseña</h1>' : ""}
+    <p style="color:var(--tinta-3)">Escriba la contraseña nueva dos veces. Debe tener al menos 6 caracteres.</p>
+    <form data-form="nuevaClave">
+      ${campoClave("clave1", "clave1", "Contraseña nueva", "new-password")}
+      ${campoClave("clave2", "clave2", "Repítala", "new-password")}
+      <button class="btn">Guardar la contraseña</button>
+    </form></div></main>`);
+}
 const formularios = {
+  async nuevaClave(f) {
+    if (f.clave1 !== f.clave2) throw new Error("Las dos contraseñas no son iguales. Escríbalas de nuevo.");
+    await pedir(sb.auth.updateUser({ password: f.clave1 }));
+    recuperando = false;
+    if (location.hash.includes("type=recovery") || location.hash.includes("access_token")) history.replaceState(null, "", location.pathname);
+    ir("#/", bien("Contraseña cambiada."));
+  },
   async entrar(f) { await pedir(sb.auth.signInWithPassword({ email: f.correo.trim(), password: f.clave })); },
   async crear(f) {
     const d = await pedir(sb.auth.signUp({ email: f.correo.trim(), password: f.clave, options: { emailRedirectTo: location.origin + location.pathname } }));
@@ -153,6 +178,21 @@ const formularios = {
   },
 };
 const acciones = {
+  verClave(el) {
+    const campo = document.getElementById(el.dataset.para), ver = campo.type === "password";
+    campo.type = ver ? "text" : "password";
+    el.textContent = ver ? "Ocultar" : "Ver";
+    el.setAttribute("aria-pressed", ver ? "true" : "false");
+    el.setAttribute("aria-label", ver ? "Ocultar la contraseña" : "Mostrar la contraseña");
+    campo.focus();
+  },
+  async recuperar() {
+    const correo = document.getElementById("correo").value.trim();
+    if (!correo) { aviso = mal("Escriba primero su correo y luego toque «Olvidé mi contraseña»."); return vistaEntrar(); }
+    await pedir(sb.auth.resetPasswordForEmail(correo, { redirectTo: location.origin + location.pathname }));
+    aviso = bien("Si ese correo está registrado, le llegó un enlace para poner una contraseña nueva. Ábralo en este mismo teléfono.");
+    vistaEntrar();
+  },
   modoCrear: () => vistaEntrar("crear"),
   modoEntrar: () => vistaEntrar(),
   async enlace() {
@@ -1794,6 +1834,7 @@ function vistaYo() {
     ${yo.es_direccion ? '<a class="btn" href="#/personas" style="margin-top:28px">Personas del equipo: fichas y accesos</a>' : ""}
     ${yo.asigna || yo.dirige.length ? `<a class="btn claro" href="#/impacto" style="margin-top:${yo.es_direccion ? 14 : 28}px">Mi impacto</a>` : ""}
     <div class="grupo">En el teléfono</div><p>Para tenerla como una aplicación: en iPhone, botón de compartir y «Agregar a inicio»; en Android, menú del navegador e «Instalar aplicación».</p>
+    <a class="btn claro" href="#/clave" style="margin-top:22px">Cambiar mi contraseña</a>
     <button class="btn peligro" data-accion="salir">Salir</button></main>`);
 }
 function vistaSinFicha() {
@@ -1806,6 +1847,7 @@ acciones.reintentar = () => arrancar();
 // ---------- navegación ----------
 async function navegar() {
   if (!usuario) return vistaEntrar();
+  if (recuperando) return vistaNuevaClave();
   if (!yo) return vistaSinFicha();
   const [, ruta = "", arg, arg2] = location.hash.split("/");
   app.classList.toggle("ancho", ruta === "mando");
@@ -1833,6 +1875,7 @@ async function navegar() {
     else if (ruta === "contacto-nuevo") await vistaContactoNuevo();
     else if (ruta === "tarifas") await vistaTarifas();
     else if (ruta === "yo") vistaYo();
+    else if (ruta === "clave") vistaNuevaClave();
     else await vistaDia();
   } catch (e) {
     pinta(cabecera("No se pudo abrir", { atras: "#/" }) + `<main><div class="error">${h(decir(e))}</div><button class="btn claro" data-accion="reintentar">Intentar de nuevo</button></main>`);
@@ -1872,6 +1915,7 @@ window.addEventListener("hashchange", navegar);
 sb.auth.onAuthStateChange((evento, sesion) => {
   const antes = usuario?.id;
   usuario = sesion?.user || null;
+  if (evento === "PASSWORD_RECOVERY") { recuperando = true; setTimeout(vistaNuevaClave, 0); return; }
   if (evento === "INITIAL_SESSION" || usuario?.id !== antes) setTimeout(arrancar, 0);
 });
 if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
