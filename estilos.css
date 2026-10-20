@@ -374,3 +374,20 @@ a.fila.despliega:hover::after{border-color:var(--tinta)}
 .clave .ver-clave{position:absolute;right:0;bottom:0;height:48px;min-width:72px;background:none;border:0;cursor:pointer;
   font:600 .62rem var(--ui);letter-spacing:.16em;text-transform:uppercase;color:var(--tinta-3)}
 .clave .ver-clave[aria-pressed="true"]{color:var(--tinta)}
+
+/* Personas: departamentos en los que interviene cada una (varios a la vez). */
+.deptos{justify-content:flex-start;margin-top:6px}
+.p-deptos{margin-top:6px}
+.p-deptos summary{cursor:pointer;font-size:.86rem;color:var(--tinta-3);list-style:none;display:inline-flex;align-items:center;gap:6px}
+.p-deptos summary::-webkit-details-marker{display:none}
+.p-deptos summary::after{content:"";width:6px;height:6px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:translateY(-2px) rotate(45deg);transition:transform .2s}
+.p-deptos[open] summary::after{transform:translateY(1px) rotate(-135deg)}
+.fila .papeles{display:flex;margin-top:8px}
+
+/* Personas: ver por rol o por departamento. */
+.ver-por{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:18px 0 4px;font-size:.86rem;color:var(--tinta-3)}
+.ver-por span{margin-right:4px}
+.ver-por button{font:500 .82rem var(--ui);background:none;color:var(--tinta);border:1px solid var(--linea);padding:6px 12px;min-height:36px;cursor:pointer}
+.ver-por button[aria-pressed="true"]{background:var(--tinta);color:var(--papel);border-color:var(--tinta)}
+.ver-por button:focus-visible{outline:2px solid var(--tinta);outline-offset:2px}
+.grupo .g-n{font:inherit;color:var(--taupe);margin-left:6px}

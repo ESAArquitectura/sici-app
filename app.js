@@ -1192,7 +1192,19 @@ formularios.proyecto = async f => {
 // pestañas. La plata, las alertas y las frases las calcula la base
 // (v_obra_tablero); aquí se pintan. Quién registra y quién aprueba también lo
 // decide la base: el residente registra en su obra, dirección aprueba.
-const SECCION_OBRA = [["resumen", "Resumen"], ["gastos", "Gastos y facturas"], ["flujo", "Flujo de caja"], ["documentos", "Documentos"], ["pendientes", "Pendientes"], ["sitio", "Registro en sitio"]];
+const SECCION_OBRA = [["resumen", "Resumen"], ["programacion", "Programación"], ["gastos", "Gastos y facturas"], ["flujo", "Flujo de caja"], ["documentos", "Documentos"], ["pendientes", "Pendientes"], ["sitio", "Registro en sitio"]];
+// El dinero de proyectos y obras lo ven socios, dirección y el área financiera. Ningún cargo
+// por debajo ve cifras: ni contrato, ni gastos, ni caja, ni documentos de plata.
+const veFinanzas = () => !!yo && (yo.es_direccion || ["socio", "director", "financiero"].includes(yo.rol));
+const SOLO_FINANZAS = ["gastos", "flujo"], DOC_FINANZAS = ["contrato", "presupuesto", "factura"];
+// El tiempo de la obra, en días: cuánto lleva, cuánto le queda.
+function tiempoObra(o) {
+  if (!o.fecha_inicio || !o.fecha_fin_prevista) return null;
+  const a = dia0(o.fecha_inicio), b = dia0(o.fecha_fin_prevista), hoy = dia0(hoyIso()), total = Math.max(1, b - a);
+  return { total, lleva: Math.max(0, Math.min(total, hoy - a)), quedan: b - hoy, pct: Math.max(0, Math.min(100, Math.round((hoy - a) / total * 100))) };
+}
+const lecturaTiempo = o => { const t = tiempoObra(o); if (!t) return "La obra todavía no tiene fechas de inicio y entrega.";
+  return t.quedan < 0 ? `Debía entregarse hace ${uno(-t.quedan, "un día", "días")}.` : `Va en el día ${num(t.lleva)} de ${num(t.total)} (${t.pct} % del tiempo) · faltan ${uno(t.quedan, "un día", "días")} para entregarla.`; };
 const ESTADO_DINERO = { compromiso: "Comprometido", causacion: "Facturado, por pagar", pago: "Pagado" };
 const MEDIO = { banco: "Transferencia o consignación", efectivo: "Efectivo", tarjeta: "Tarjeta", credito: "Crédito" };
 const TIPO_DOC = { contrato: "Contrato", presupuesto: "Presupuesto", planos: "Planos", licencia: "Licencia", poliza: "Póliza", acta: "Acta", factura: "Factura", informe: "Informe", otro: "Otro" };
@@ -1213,9 +1225,10 @@ async function vistaObras() {
   const frase = !obras.length ? "" : conAlerta.length ? `${conAlerta.length === 1 ? "Una obra tiene" : conAlerta.length + " obras tienen"} algo que mover hoy.` : "Todas las obras están al día.";
   pinta(cabecera("Obras", { sobre: obras.length ? uno(activas, "Una obra en curso", "obras en curso") : "" }) + `<main>
     ${frase ? `<p class="frase">${h(frase)}</p>` : ""}
-    ${yo.ve_dinero && obras.length > 1 ? `<p style="color:var(--tinta-3)">Entre todas llevan ${pesos(suma("costo_proyectado"))} en gastos y deben ${pesos(suma("por_pagar"))}.</p>` : ""}
+    ${veFinanzas() && obras.length > 1 ? `<p style="color:var(--tinta-3)">Entre todas llevan ${pesos(suma("costo_proyectado"))} en gastos y deben ${pesos(suma("por_pagar"))}.</p>` : ""}
     ${obras.map(o => `<a class="fila" href="#/obra/${o.id}"><b>${h(o.nombre)}${o.estado === "pausado" ? '<span class="marca n">En pausa</span>' : ""}</b>
-      ${o.alerta ? `<span><em>${h(o.alerta)}</em></span>` : ""}<span>${h(o.lectura)}</span>
+      ${veFinanzas() ? `${o.alerta ? `<span><em>${h(o.alerta)}</em></span>` : ""}<span>${h(o.lectura)}</span>`
+        : `${o.pendientes_vencidos ? `<span><em>${uno(o.pendientes_vencidos, "Un pendiente pasó su fecha", "pendientes pasaron su fecha")}</em></span>` : ""}<span>${h(lecturaTiempo(o))}</span>`}
       <span>${o.residente ? "Residente: " + h(o.residente) : "Sin residente"} · ${o.ultima_bitacora ? "última bitácora el " + h(fecha(o.ultima_bitacora)) : "sin bitácora"}</span></a>`).join("")
       || `<p class="vacio">${yo.es_direccion ? "Todavía no hay obras. Abra la primera con el botón de abajo." : "Todavía no hace parte de ninguna obra."}</p>`}
     ${yo.es_direccion ? '<a class="btn" href="#/nuevo-proyecto/obra">Abrir una obra</a>' : ""}</main>` + pie("#/obras"));
@@ -1224,19 +1237,53 @@ async function vistaObras() {
 async function vistaObra(id, sec = "resumen") {
   const o = await pedir(sb.from("v_obra_tablero").select("*").eq("id", id).maybeSingle());
   if (!o) return pinta(cabecera("Obra", { atras: "#/obras" }) + '<main><p class="vacio">Esa obra no existe, ya terminó o usted no hace parte de ella.</p></main>' + pie("#/obras"));
-  if (!OBRA[sec]) sec = "resumen";
+  if (!OBRA[sec] || (SOLO_FINANZAS.includes(sec) && !veFinanzas())) sec = "resumen";
   trasPintar = null;
   const cuerpo = await OBRA[sec](o, yo.registra.includes(id));
   pinta(cabecera(o.nombre, { sobre: `Obra · ${o.codigo}`, atras: "#/obras" }) +
-    `<nav class="pestanas" aria-label="Espacios de la obra"><div>${SECCION_OBRA.map(([k, n]) => `<a href="#/obra/${id}/${k}" ${k === sec ? 'aria-current="page"' : ""}>${n}</a>`).join("")}</div></nav>
+    `<nav class="pestanas" aria-label="Espacios de la obra"><div>${SECCION_OBRA.filter(([k]) => veFinanzas() || !SOLO_FINANZAS.includes(k)).map(([k, n]) => `<a href="#/obra/${id}/${k}" ${k === sec ? 'aria-current="page"' : ""}>${n}</a>`).join("")}</div></nav>
     <main>${cuerpo}</main>` + pie("#/obras"));
   document.querySelector('.pestanas [aria-current="page"]')?.scrollIntoView({ inline: "center", block: "nearest" });
   trasPintar?.();
 }
 
+// El resumen para quien no ve dinero (el residente, por ejemplo): el tiempo de la obra, lo que hay
+// que mover y su impacto. El impacto económico se dice en proporción del presupuesto, sin cifras.
+async function resumenSinPlata(o) {
+  const pend = await pedir(sb.from("pendiente_obra").select("id,titulo,estado,fecha_compromiso,responsable_id,ejecutor_id,verificado_en").eq("proyecto_id", o.id));
+  const hoy = hoyIso(), t = tiempoObra(o), mios = pend.filter(p => p.responsable_id === yo.persona_id || p.ejecutor_id === yo.persona_id);
+  const vivos = mios.filter(p => !["cerrado", "descartado"].includes(p.estado));
+  const hechos = mios.filter(p => p.estado === "cerrado" || p.estado === "por_verificar");
+  const aTiempo = hechos.filter(p => !p.fecha_compromiso || !p.verificado_en || p.verificado_en.slice(0, 10) <= p.fecha_compromiso).length;
+  const vencidos = vivos.filter(p => p.estado !== "por_verificar" && p.fecha_compromiso && p.fecha_compromiso < hoy);
+  const atraso = vencidos.reduce((n, p) => n + (dia0(hoy) - dia0(p.fecha_compromiso)), 0);
+  const porDia = t ? 100 / t.total : null, riesgo = porDia != null ? atraso * porDia : null;
+  const mover = [
+    o.pendientes_abiertos ? [`${o.id}/pendientes`, uno(o.pendientes_abiertos, "Un pendiente abierto", "pendientes abiertos"),
+      o.pendientes_vencidos ? (o.pendientes_vencidos === 1 ? "Uno ya pasó su fecha" : `${o.pendientes_vencidos} ya pasaron su fecha`) : "Ninguno ha pasado su fecha", o.pendientes_vencidos > 0] : null,
+    o.estado === "activo" && o.dias_sin_bitacora ? [`${o.id}/sitio`, `${uno(o.dias_sin_bitacora, "Un día", "días")} de obra sin bitácora`, "En el último mes, de lunes a sábado", o.dias_sin_bitacora >= 3] : null,
+  ].filter(Boolean);
+  return `<p class="frase">${h(lecturaTiempo(o))}</p>
+    <div class="grupo">El tiempo</div><div class="cifras">
+      ${cifra("Empezó", o.fecha_inicio ? fecha(o.fecha_inicio) : "Sin fecha")}${cifra("Se entrega", o.fecha_fin_prevista ? fecha(o.fecha_fin_prevista) : "Sin fecha")}
+      ${t ? cifra("Tiempo transcurrido", `${t.pct} %`, `día ${num(t.lleva)} de ${num(t.total)}`) + cifra("Faltan", uno(Math.max(0, t.quedan), "un día", "días"), "", t.quedan < 0) : ""}</div>
+    <a class="enlace" href="#/obra/${o.id}/programacion">Ver la programación completa ›</a>
+    <div class="grupo">Lo que hay que mover</div>
+    ${mover.map(([r, tx, sx, mal]) => `<a class="fila" href="#/obra/${r}"><b>${h(tx)}</b><span>${mal ? `<em>${h(sx)}</em>` : h(sx)}</span></a>`).join("") || '<p class="vacio" style="padding:14px 0">Nada pendiente.</p>'}
+    ${mios.length ? `<div class="grupo">Su impacto en la obra</div><div class="cifras">
+        ${cifra("Pendientes cumplidos", `${hechos.length} de ${mios.length}`, hechos.length ? `${aTiempo} a tiempo` : "")}
+        ${cifra("Pasaron su fecha", String(vencidos.length), vencidos.length ? `suman ${uno(atraso, "un día", "días")} de atraso` : "ninguno atrasado", vencidos.length > 0)}
+        ${riesgo != null ? cifra("Impacto en la economía", vencidos.length ? `${num(Math.round(riesgo * 10) / 10)} %` : "0 %", "del presupuesto, por días de atraso", riesgo > 0) : ""}</div>
+      <p class="nota">${riesgo == null ? "Cuando la obra tenga fechas de inicio y entrega, aquí se calcula el impacto económico de los atrasos."
+        : vencidos.length ? `Cada día de atraso de la obra equivale a cerca del ${num(Math.round(porDia * 100) / 100)} % de su presupuesto. Ponerse al día con ${vencidos.length === 1 ? "ese pendiente" : "esos pendientes"} es lo que más le aporta hoy a la obra.`
+        : "Sus pendientes van al día: sus cumplimientos no le están costando a la obra."} Es una estimación en proporción del presupuesto, sin cifras de dinero.</p>` : ""}
+    <div class="grupo">Datos de la obra</div><div class="fila"><b>${o.residente ? h(o.residente) : "Sin residente"}</b><span>Residente</span></div>`;
+}
+
 const OBRA = {
   // Cómo va la plata, en qué se fue y lo que hay que mover.
   async resumen(o) {
+    if (!veFinanzas()) return resumenSinPlata(o);
     const [cats, gente] = await Promise.all([
       pedir(sb.from("v_balance_centro_costo").select("categoria,presupuesto,proyectado,por_pagar,excluir_de_rentabilidad").eq("proyecto_id", o.id)),
       yo.es_direccion ? pedir(sb.from("persona").select("id,nombre").eq("es_interno", true).eq("activo", true).order("nombre")) : [],
@@ -1269,6 +1316,20 @@ const OBRA = {
           <label for="es">Estado</label><select id="es" name="estado">${opciones({ activo: "En curso", pausado: "En pausa", terminado: "Terminada" }, o.estado)}</select>
           <button class="btn claro">Guardar los datos</button></form>`
         : `<div class="grupo">Datos de la obra</div><div class="fila"><b>${o.residente ? h(o.residente) : "Sin residente"}</b><span>Residente${o.fecha_inicio ? " · empezó el " + h(fecha(o.fecha_inicio)) : ""}${o.fecha_fin_prevista ? " · se entrega el " + h(fecha(o.fecha_fin_prevista)) : ""}</span></div>`}`;
+  },
+
+  // Lo que viene en la obra, semana a semana: el tiempo y los pendientes con su fecha.
+  async programacion(o) {
+    const pend = await pedir(sb.from("pendiente_obra").select("id,titulo,tipo,prioridad,ubicacion,estado,fecha_compromiso,responsable_id,ejecutor_id").eq("proyecto_id", o.id).not("estado", "in", "(cerrado,descartado)").order("fecha_compromiso", { nullsFirst: false }));
+    const quien = await nombresDe(pend.flatMap(p => [p.responsable_id, p.ejecutor_id])), t = tiempoObra(o), hoy = hoyIso(), lunes = lunesDe(hoy);
+    const tramoDe = p => !p.fecha_compromiso ? "sin" : p.fecha_compromiso < hoy && p.estado !== "por_verificar" ? "vencidos" : lunesDe(p.fecha_compromiso) === lunes ? "semana" : "despues";
+    const grupos = [["vencidos", "Pasaron su fecha"], ["semana", "Esta semana"], ["despues", "Semanas siguientes"], ["sin", "Sin fecha"]].map(([k, n]) => [n, pend.filter(p => tramoDe(p) === k), k]).filter(([, l]) => l.length);
+    return `<p class="frase">${h(lecturaTiempo(o))}</p>
+      ${t ? `<span class="av-g" style="margin:14px 0 4px"><i><b style="width:${t.pct}%"></b></i><strong>${t.pct} %</strong></span>
+        <p class="nota" style="margin-top:6px">Empezó el ${h(fecha(o.fecha_inicio))} y se entrega el ${h(fecha(o.fecha_fin_prevista))}. La barra es el tiempo que ha pasado, no lo construido.</p>` : ""}
+      ${grupos.map(([n, l, k]) => `<div class="grupo">${h(n)} <small class="g-n">${l.length}</small></div>${l.map(p => `<a class="fila" href="#/obra/${o.id}/pendientes"><b>${h(p.titulo)}${marca(p.prioridad)}</b>
+        <span>${p.fecha_compromiso ? (k === "vencidos" ? `<em>era para el ${h(fecha(p.fecha_compromiso))}</em>` : "para el " + h(fecha(p.fecha_compromiso))) : "sin fecha"} · responde ${h(quien.get(p.responsable_id) || "alguien")}${p.ubicacion ? " · " + h(p.ubicacion) : ""} · ${h(ESTADO_PEND[p.estado])}</span></a>`).join("")}`).join("")
+        || '<p class="vacio">No hay pendientes programados.</p>'}`;
   },
 
   // Registrar un gasto, aprobar lo que pasa del umbral, pagar lo facturado.
@@ -1351,14 +1412,15 @@ const OBRA = {
     const docs = await pedir(sb.from("documento_obra").select("id,tipo,titulo,enlace,fecha,registrado_por,registrado_en").eq("proyecto_id", o.id).is("retirado_en", null).order("registrado_en", { ascending: false }));
     const quien = await nombresDe(docs.map(d => d.registrado_por));
     if (o.carpeta_drive) trasPintar = () => pintaDrive(o.carpeta_drive);
-    const porTipo = Object.keys(TIPO_DOC).map(t => [t, docs.filter(d => d.tipo === t)]).filter(([, a]) => a.length);
+    const tipos = Object.keys(TIPO_DOC).filter(t => veFinanzas() || !DOC_FINANZAS.includes(t));
+    const porTipo = tipos.map(t => [t, docs.filter(d => d.tipo === t)]).filter(([, a]) => a.length);
     return `<div class="grupo">Lo importante</div>
       ${porTipo.map(([t, a]) => a.map(d => `<div class="fila"><a href="${h(d.enlace)}" target="_blank" rel="noopener" class="doc"><b>${h(d.titulo)} ›</b></a>
         <span>${h(TIPO_DOC[t])}${d.fecha ? " · del " + h(fecha(d.fecha)) : ""} · lo puso ${h(quien.get(d.registrado_por) || "alguien")}</span>
         ${yo.es_direccion || d.registrado_por === yo.persona_id ? `<button class="enlace" data-accion="retirarDocumento" data-id="${d.id}">Retirar</button>` : ""}</div>`).join("")).join("")
         || '<p class="vacio" style="padding:14px 0">Todavía no hay documentos en el índice. Ponga aquí el contrato, el presupuesto, los planos, la licencia y las pólizas.</p>'}
       ${registra ? `<details><summary class="btn claro">Agregar un documento</summary><form data-form="documento" data-id="${o.id}">
-          <label for="dt">Qué es</label><select id="dt" name="tipo">${opciones(TIPO_DOC)}</select>
+          <label for="dt">Qué es</label><select id="dt" name="tipo">${opciones(Object.fromEntries(tipos.map(t => [t, TIPO_DOC[t]])))}</select>
           <label for="dn">Nombre</label><input id="dn" name="titulo" required minlength="3" autocomplete="off" placeholder="Contrato de obra firmado">
           <label for="de">Enlace de Drive</label><input id="de" name="enlace" type="url" inputmode="url" required placeholder="https://drive.google.com/…">
           <label for="df">Fecha del documento</label><input id="df" name="fecha" type="date">
@@ -1782,25 +1844,54 @@ acciones.papelFase = el => guardaFlujo(el, { responsable_papel: el.value });
 acciones.desplegar = el => { const d = [...document.querySelectorAll(`#${el.dataset.de} > details`)], abrir = d.some(x => !x.open); d.forEach(x => x.open = abrir); el.textContent = abrir ? "Recoger todo" : "Desplegar todo"; };
 
 // ---------- personas ----------
+// Los departamentos en los que una persona interviene; puede impactar en varios.
+const DEPARTAMENTOS = [["arquitectura", "Arquitectura"], ["diseno", "Diseño"], ["obra", "Obra"], ["mercadeo", "Mercadeo"], ["ventas", "Ventas"], ["administrativo", "Administrativo y financiero"]];
+const casillasDepto = (pref, marcados = [], cambia = "") => `<span class="papeles deptos" role="group" aria-label="Departamentos">${DEPARTAMENTOS.map(([v, n]) =>
+  `<label><input type="checkbox" name="${pref}:${v}" value="1" ${marcados.includes(v) ? "checked" : ""} ${cambia}>${n}</label>`).join("")}</span>`;
+const nombrarDeptos = l => lista((l || []).map(v => (DEPARTAMENTOS.find(d => d[0] === v) || [, v])[1]));
+let personasPor = "rol";   // cómo se agrupa la lista de personas
+acciones.personasPor = el => { personasPor = el.dataset.por; navegar(); };
 async function vistaPersonas() {
   const [personas, profesiones] = await Promise.all([
-    pedir(sb.from("persona").select("id,nombre,rol,correo,auth_user_id,ve_reservado,profesion(nombre)").eq("es_interno", true).eq("activo", true).order("nombre")),
+    pedir(sb.from("persona").select("id,nombre,rol,correo,auth_user_id,ve_reservado,departamentos,profesion(nombre)").eq("es_interno", true).eq("activo", true).order("nombre")),
     yo.es_direccion ? pedir(sb.from("profesion").select("id,nombre").eq("activa", true).order("nombre")) : [],
   ]);
-  pinta(cabecera("Personas", { atras: yo.obras && (yo.asigna || yo.dirige.length) ? "#/yo" : "#/equipo" }) + `<main>
-    ${personas.map(p => `<div class="fila"><b>${h(p.nombre)}<span class="marca ${p.auth_user_id ? "o" : "n"}">${p.auth_user_id ? "Ya entró" : "No ha entrado"}</span></b>
+  // La misma ficha sirve para los dos agrupamientos; quien está en varios departamentos sale en cada uno.
+  const fila = p => `<div class="fila"><b>${h(p.nombre)}<span class="marca ${p.auth_user_id ? "o" : "n"}">${p.auth_user_id ? "Ya entró" : "No ha entrado"}</span></b>
       <span>${h(ROL[p.rol] || p.rol)}${p.profesion ? " · " + h(p.profesion.nombre) : ""}${yo.es_direccion && p.correo ? " · " + h(p.correo) : ""}</span>
+      ${yo.es_direccion ? `<details class="p-deptos"><summary>${p.departamentos?.length ? "Interviene en " + h(nombrarDeptos(p.departamentos)) : "Sin departamento · asignar"}</summary>
+        ${casillasDepto("d", p.departamentos || [], `data-cambia="deptos" data-id="${p.id}"`)}<i class="m-ok" aria-live="polite"></i></details>`
+        : p.departamentos?.length ? `<span>Interviene en ${h(nombrarDeptos(p.departamentos))}</span>` : ""}
       ${yo.es_socio && p.rol !== "socio" ? `<button class="enlace" data-accion="reservado" data-id="${p.id}" data-si="${p.ve_reservado ? "" : "1"}">${p.ve_reservado ? "Ve préstamos y socios · quitarle el permiso" : "Darle permiso de ver préstamos y socios"}</button>`
-        : yo.ve_reservado && (p.rol === "socio" || p.ve_reservado) ? "<span>Ve préstamos y socios</span>" : ""}</div>`).join("")}
+        : yo.ve_reservado && (p.rol === "socio" || p.ve_reservado) ? "<span>Ve préstamos y socios</span>" : ""}</div>`;
+  const ORDEN_ROL = ["socio", "director", "director_proyecto", "arquitecto", "residente", "mercadeo", "financiero", "practicante"];
+  const grupos = personasPor === "departamento"
+    ? [...DEPARTAMENTOS.map(([v, n]) => [n, personas.filter(p => (p.departamentos || []).includes(v))]), ["Sin departamento", personas.filter(p => !p.departamentos?.length)]].filter(([, l]) => l.length)
+    : [...new Set([...ORDEN_ROL, ...personas.map(p => p.rol)])].map(r => [ROL[r] || r, personas.filter(p => p.rol === r)]).filter(([, l]) => l.length);
+  pinta(cabecera("Personas", { atras: yo.obras && (yo.asigna || yo.dirige.length) ? "#/yo" : "#/equipo" }) + `<main>
+    <div class="ver-por" role="group" aria-label="Ver personas por"><span>Ver por</span>${[["rol", "Rol"], ["departamento", "Departamento"]].map(([v, n]) =>
+      `<button type="button" data-accion="personasPor" data-por="${v}" aria-pressed="${personasPor === v}">${n}</button>`).join("")}</div>
+    ${grupos.map(([n, l]) => `<div class="grupo">${h(n)} <small class="g-n">${l.length}</small></div>${l.map(fila).join("")}`).join("")}
     ${yo.es_direccion ? `<div class="grupo">Agregar a alguien</div><form data-form="persona">
       <label for="pn">Nombre completo</label><input id="pn" name="nombre" required autocomplete="off">
       <label for="pc">Correo con el que va a entrar</label><input id="pc" name="correo" type="email" required autocomplete="off" inputmode="email">
       <div class="dos"><div><label for="prl">Rol</label><select id="prl" name="rol">${["practicante", "arquitecto", "director_proyecto", "residente", "director", "mercadeo", "financiero", "socio"].map(r => `<option value="${r}">${ROL[r]}</option>`).join("")}</select></div>
         <div><label for="pf">Profesión</label><select id="pf" name="profesion"><option value="">Sin definir</option>${profesiones.map(x => `<option value="${x.id}">${h(x.nombre)}</option>`).join("")}</select></div></div>
+      <label>Departamentos en los que interviene</label>${casillasDepto("dep")}
+      <p class="nota" style="margin-top:8px">Puede marcar varios: una persona puede impactar en más de un departamento.</p>
       <button class="btn">Agregar al equipo de ESA</button>
       <p class="nota">Después, esa persona abre la aplicación, toca «Es mi primera vez» y crea su acceso con ese mismo correo.</p></form>` : ""}
   </main>`);
 }
+// Cambiar los departamentos de alguien se guarda al marcar, sin repintar.
+acciones.deptos = async el => {
+  const caja = el.closest("details"), ok = caja.querySelector(".m-ok"), departamentos = [...caja.querySelectorAll("input:checked")].map(i => i.name.split(":")[1]);
+  try { const r = await pedir(sb.from("persona").update({ departamentos }).eq("id", el.dataset.id).select("id"));
+    if (!r.length) throw new Error("Los departamentos los cambia dirección.");
+    caja.querySelector("summary").textContent = departamentos.length ? "Interviene en " + nombrarDeptos(departamentos) : "Sin departamento · asignar";
+    ok.className = "m-ok"; ok.textContent = "Guardado.";
+  } catch (e) { ok.className = "m-ok mal"; ok.textContent = decir(e); el.checked = !el.checked; }
+};
 // F7 · Préstamos y la cuenta de los socios: los ve un socio y a quien él le dé el permiso.
 acciones.reservado = async el => {
   const si = !!el.dataset.si;
@@ -1809,13 +1900,15 @@ acciones.reservado = async el => {
   aviso = r.length ? bien(si ? "Permiso dado: ya ve préstamos y socios." : "Permiso quitado.") : mal("Este permiso lo da un socio."); navegar();
 };
 formularios.persona = async f => {
-  await pedir(sb.from("persona").insert({ nombre: f.nombre.trim(), correo: f.correo.trim().toLowerCase(), rol: f.rol, es_interno: true, horas_semana: 40, profesion_id: f.profesion || null }));
+  const departamentos = DEPARTAMENTOS.map(([v]) => v).filter(v => f["dep:" + v]);
+  if (!departamentos.length) throw new Error("Marque al menos un departamento en el que interviene.");
+  await pedir(sb.from("persona").insert({ nombre: f.nombre.trim(), correo: f.correo.trim().toLowerCase(), rol: f.rol, es_interno: true, horas_semana: 40, profesion_id: f.profesion || null, departamentos }));
   aviso = bien(`${f.nombre.trim()} ya tiene ficha. Falta que cree su acceso con ese correo.`); navegar();
 };
 
 // ---------- impacto ----------
 async function vistaImpacto(abierto) {
-  const ind = await pedir(sb.rpc("indicadores"));
+  const ind = (await pedir(sb.rpc("indicadores"))).filter(i => veFinanzas() || i.indicador !== "margen");
   const detalle = abierto ? await pedir(sb.rpc("indicador_detalle", { p_indicador: abierto })) : null;
   const con = ["cumplio", "primera", "espera", "hitos", "margen", "revisiones"];
   pinta(cabecera("Impacto", { sobre: "Últimas cuatro semanas" }) + `<main>${ind.map(i => `
