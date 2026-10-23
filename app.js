@@ -1261,6 +1261,7 @@ async function resumenSinPlata(o) {
   const mover = [
     o.pendientes_abiertos ? [`${o.id}/pendientes`, uno(o.pendientes_abiertos, "Un pendiente abierto", "pendientes abiertos"),
       o.pendientes_vencidos ? (o.pendientes_vencidos === 1 ? "Uno ya pasó su fecha" : `${o.pendientes_vencidos} ya pasaron su fecha`) : "Ninguno ha pasado su fecha", o.pendientes_vencidos > 0] : null,
+    o.compras_pedidas ? [`${o.id}/pendientes`, uno(o.compras_pedidas, "Una compra pedida", "compras pedidas"), "Esperan que las compren; cuando lleguen, confirme que llegaron", false] : null,
     o.estado === "activo" && o.dias_sin_bitacora ? [`${o.id}/sitio`, `${uno(o.dias_sin_bitacora, "Un día", "días")} de obra sin bitácora`, "En el último mes, de lunes a sábado", o.dias_sin_bitacora >= 3] : null,
   ].filter(Boolean);
   return `<p class="frase">${h(lecturaTiempo(o))}</p>
@@ -1332,19 +1333,28 @@ const OBRA = {
         || '<p class="vacio">No hay pendientes programados.</p>'}`;
   },
 
-  // Registrar un gasto, aprobar lo que pasa del umbral, pagar lo facturado.
-  async gastos(o, registra) {
-    const [porAprobar, porPagar, ultimos, cats, par] = await Promise.all([
+  // Registrar un gasto, aprobar lo que pasa del umbral, pagar lo facturado. Lo registran finanzas y
+  // dirección (C1): la obra pide las compras en Pendientes y aquí se les cuelga su gasto (C3).
+  async gastos(o) {
+    const registra = veFinanzas();
+    const [porAprobar, porPagar, ultimos, cats, par, pedidas] = await Promise.all([
       pedir(sb.from("v_movimiento_vigente").select("id,fecha,valor,tercero_id,tercero_nombre,concepto,numero_factura,registrado_por").eq("proyecto_id", o.id).eq("aprobacion", "pendiente").order("fecha")),
       pedir(sb.from("v_obra_por_pagar").select("*").eq("proyecto_id", o.id).order("fecha_prevista")),
       pedir(sb.from("v_movimiento_vigente").select("id,fecha,estado,naturaleza,valor,tercero_id,tercero_nombre,concepto,numero_factura,aprobacion").eq("proyecto_id", o.id).order("fecha", { ascending: false }).order("registrado_en", { ascending: false }).limit(25)),
       registra ? pedir(sb.from("categoria_costo").select("id,nombre,tipo_gasto").eq("activo", true).order("orden").order("nombre")) : [],
       registra ? pedir(sb.from("parametro").select("umbral_aprobacion").maybeSingle()) : null,
+      pedir(sb.from("pendiente_obra").select("id,titulo,ubicacion,prioridad,fecha_compromiso,creado_por").eq("proyecto_id", o.id).eq("tipo", "compra")
+        .is("movimiento_id", null).not("estado", "in", "(cerrado,descartado)").order("fecha_compromiso", { nullsFirst: false })),
     ]);
-    const quien = await nombresDe([...porAprobar, ...ultimos].flatMap(m => [m.tercero_id, m.registrado_por]));
+    const quien = await nombresDe([...porAprobar, ...ultimos].flatMap(m => [m.tercero_id, m.registrado_por]).concat(pedidas.map(p => p.creado_por)));
     const tercero = m => m.tercero_nombre || quien.get(m.tercero_id) || "Sin tercero";
     const hoy = hoyIso(), deObra = cats.filter(c => c.tipo_gasto === "COSTOS OPERATIVOS"), otras = cats.filter(c => c.tipo_gasto !== "COSTOS OPERATIVOS");
-    return `${registra ? `<details ${ultimos.length ? "" : "open"}><summary class="btn">Registrar un gasto</summary><form data-form="gasto" data-id="${o.id}">
+    return `${pedidas.length ? `<div class="grupo a">Compras que pidió la obra <small class="g-n">${pedidas.length}</small></div>
+      ${pedidas.map(p => `<div class="fila"><b>${h(p.titulo)}${marca(p.prioridad)}</b>
+        <span>La pidió ${h(quien.get(p.creado_por) || "alguien")}${p.ubicacion ? " · " + h(p.ubicacion) : ""} · ${p.fecha_compromiso ? (p.fecha_compromiso < hoy ? `<em>era para el ${h(fecha(p.fecha_compromiso))}</em>` : "para el " + h(fecha(p.fecha_compromiso))) : "sin fecha"}</span>
+        ${registra ? `<button class="btn claro" data-accion="comprarPedido" data-id="${p.id}" data-titulo="${h(p.titulo)}">Registrar su gasto</button>` : ""}</div>`).join("")}` : ""}
+      ${registra ? `<details id="registrar-gasto" ${ultimos.length || pedidas.length ? "" : "open"}><summary class="btn">Registrar un gasto</summary><form data-form="gasto" data-id="${o.id}">
+        ${pedidas.length ? `<label for="gk">Es la compra que pidió la obra</label><select id="gk" name="compra"><option value="">No, es otro gasto</option>${pedidas.map(p => `<option value="${p.id}">${h(p.titulo)}</option>`).join("")}</select>` : ""}
         <label for="ge">Qué pasó</label><select id="ge" name="estado">${opciones({ causacion: "Llegó la factura y falta pagarla", pago: "Ya se pagó", compromiso: "Quedó comprometido (orden o cotización aceptada)" })}</select>
         <label for="gc">Categoría</label><select id="gc" name="categoria" required>${cats.length ? "" : '<option value="">Falta cargar las categorías</option>'}
           ${deObra.length ? `<optgroup label="De la obra">${deObra.map(c => `<option value="${c.id}">${h(titulo(c.nombre))}</option>`).join("")}</optgroup>` : ""}
@@ -1434,7 +1444,7 @@ const OBRA = {
   // Remates, trámites y compras: quien lo hace no es quien lo verifica.
   async pendientes(o, registra) {
     const [abiertos, cerrados, equipo] = await Promise.all([
-      pedir(sb.from("pendiente_obra").select("id,titulo,tipo,prioridad,ubicacion,estado,fecha_compromiso,responsable_id,ejecutor_id,creado_por").eq("proyecto_id", o.id).not("estado", "in", "(cerrado,descartado)").order("fecha_compromiso", { nullsFirst: false })),
+      pedir(sb.from("pendiente_obra").select("id,titulo,tipo,prioridad,ubicacion,estado,fecha_compromiso,responsable_id,ejecutor_id,creado_por,movimiento_id").eq("proyecto_id", o.id).not("estado", "in", "(cerrado,descartado)").order("fecha_compromiso", { nullsFirst: false })),
       pedir(sb.from("pendiente_obra").select("id,titulo,verificado_en,verificado_por").eq("proyecto_id", o.id).eq("estado", "cerrado").order("verificado_en", { ascending: false }).limit(5)),
       registra ? asignables(o.id) : new Map(),
     ]);
@@ -1442,9 +1452,22 @@ const OBRA = {
     const peso = { bloqueante: 0, alta: 1, normal: 2 };
     abiertos.sort((a, b) => peso[a.prioridad] - peso[b.prioridad]);
     const hoy = hoyIso(), gente = [...equipo].sort((a, b) => a[1].localeCompare(b[1]));
-    return `${registra ? `<details ${abiertos.length ? "" : "open"}><summary class="btn">Nuevo pendiente</summary><form data-form="pendiente" data-id="${o.id}">
+    // C2 · Quien no ve dinero pide la compra; responde quien compra (finanzas o dirección).
+    const ORDEN_COMPRA = ["financiero", "director", "socio"];
+    const compran = registra && !veFinanzas() ? (await pedir(sb.from("persona").select("id,nombre,rol").eq("es_interno", true).eq("activo", true)
+      .in("rol", ORDEN_COMPRA).order("nombre"))).sort((a, b) => ORDEN_COMPRA.indexOf(a.rol) - ORDEN_COMPRA.indexOf(b.rol)) : [];
+    const tipos = veFinanzas() ? TIPO_PEND : Object.fromEntries(Object.entries(TIPO_PEND).filter(([k]) => k !== "compra"));
+    return `${compran.length ? `<details ${abiertos.length ? "" : "open"}><summary class="btn">Pedir una compra</summary><form data-form="pedirCompra" data-id="${o.id}">
+        <label for="kt">Qué se necesita y cuánto</label><input id="kt" name="titulo" required minlength="4" autocomplete="off" placeholder="20 bultos de cemento gris">
+        <label for="ku">Para dónde</label><input id="ku" name="ubicacion" autocomplete="off" placeholder="Placa del segundo piso">
+        <div class="dos"><div><label for="kf">Para cuándo</label><input id="kf" name="fecha" type="date" min="${hoy}" required></div>
+          <div><label for="kp">Prioridad</label><select id="kp" name="prioridad">${opciones({ normal: "Normal", alta: "Alta", bloqueante: "Frena la obra" })}</select></div></div>
+        <label for="kq">Quién la compra</label><select id="kq" name="compra">${compran.map(x => `<option value="${x.id}">${h(x.nombre)} · ${h(ROL[x.rol] || x.rol)}</option>`).join("")}</select>
+        <button class="btn">Pedir la compra</button>
+        <p class="nota">Usted no registra el gasto: lo registra quien compra. Cuando llegue a la obra, confirme aquí que llegó.</p></form></details>` : ""}
+      ${registra ? `<details ${abiertos.length || compran.length ? "" : "open"}><summary class="btn${compran.length ? " claro" : ""}">Nuevo pendiente</summary><form data-form="pendiente" data-id="${o.id}">
         <label for="pt">Qué hay que hacer</label><input id="pt" name="titulo" required minlength="4" autocomplete="off" placeholder="Instalar el lavamanos del baño social">
-        <div class="dos"><div><label for="py">Tipo</label><select id="py" name="tipo">${opciones(TIPO_PEND)}</select></div>
+        <div class="dos"><div><label for="py">Tipo</label><select id="py" name="tipo">${opciones(tipos)}</select></div>
           <div><label for="pp">Prioridad</label><select id="pp" name="prioridad">${opciones({ normal: "Normal", alta: "Alta", bloqueante: "Frena a otros" })}</select></div></div>
         <label for="pu">Dónde</label><input id="pu" name="ubicacion" autocomplete="off" placeholder="Cocina, baño social, fachada…">
         <label for="pr">Responde</label><select id="pr" name="responsable" required>${gente.map(([pid, n]) => `<option value="${pid}" ${pid === yo.persona_id ? "selected" : ""}>${h(n)}</option>`).join("")}</select>
@@ -1452,11 +1475,12 @@ const OBRA = {
         <label for="pf">Para cuándo</label><input id="pf" name="fecha" type="date" min="${hoy}">
         <button class="btn">Crear el pendiente</button></form></details>` : ""}
       <div class="grupo">Abiertos</div>
-      ${abiertos.map(p => { const hizo = p.ejecutor_id || p.responsable_id, mio = [p.responsable_id, p.ejecutor_id, p.creado_por].includes(yo.persona_id);
+      ${abiertos.map(p => { const hizo = p.ejecutor_id || p.responsable_id, mio = [p.responsable_id, p.ejecutor_id, p.creado_por].includes(yo.persona_id), compra = p.tipo === "compra";
         return `<div class="fila"><b>${h(p.titulo)}${marca(p.prioridad)}</b>
           <span>${h(TIPO_PEND[p.tipo])}${p.ubicacion ? " · " + h(p.ubicacion) : ""} · responde ${h(quien.get(p.responsable_id) || "alguien")}${p.ejecutor_id ? " · lo hace " + h(quien.get(p.ejecutor_id) || "alguien") : ""}</span>
-          <span>${h(ESTADO_PEND[p.estado])}${p.fecha_compromiso ? ` · ${p.fecha_compromiso < hoy ? `<em>era para el ${h(fecha(p.fecha_compromiso))}</em>` : "para el " + h(fecha(p.fecha_compromiso))}` : ""}</span>
-          ${p.estado === "por_verificar" ? (hizo !== yo.persona_id && registra ? `<button class="btn claro" data-accion="verificarPendiente" data-id="${p.id}">Verifiqué que quedó hecho</button>` : "<span>Lo verifica alguien distinto de quien lo hizo.</span>")
+          <span>${h(compra && p.estado === "por_verificar" ? "Comprada, falta confirmar que llegó" : compra && !p.movimiento_id ? "Pedida, falta comprarla" : ESTADO_PEND[p.estado])}${p.fecha_compromiso ? ` · ${p.fecha_compromiso < hoy ? `<em>era para el ${h(fecha(p.fecha_compromiso))}</em>` : "para el " + h(fecha(p.fecha_compromiso))}` : ""}</span>
+          ${p.estado === "por_verificar" ? (hizo !== yo.persona_id && registra ? `<button class="btn claro" data-accion="verificarPendiente" data-id="${p.id}">${compra ? "Llegó a la obra" : "Verifiqué que quedó hecho"}</button>` : "<span>Lo verifica alguien distinto de quien lo hizo.</span>")
+            : compra ? (veFinanzas() ? `<a class="btn claro" href="#/obra/${o.id}/gastos">Registrar su gasto</a>` : "<span>Cuando la compren, aquí aparece para confirmar que llegó.</span>")
             : mio || yo.es_direccion ? `<button class="btn claro" data-accion="pendienteHecho" data-id="${p.id}">Ya quedó hecho</button>` : ""}
           ${yo.es_direccion || p.responsable_id === yo.persona_id ? `<details><summary class="enlace">Descartarlo</summary><form data-form="descartar" data-id="${p.id}">
             <label for="dr${p.id}">Por qué ya no se hace</label><input id="dr${p.id}" name="razon" required autocomplete="off"><button class="btn peligro">Descartar</button></form></details>` : ""}</div>`; }).join("")
@@ -1502,9 +1526,10 @@ formularios.datosObra = async (f, form) => {
 formularios.gasto = async (f, form) => {
   const id = form.dataset.id;
   const gid = await pedir(sb.rpc("registrar_gasto", { p_datos: { proyecto_id: id, categoria_id: f.categoria, estado: f.estado, valor: plata(f.valor),
-    tercero: f.tercero, concepto: f.concepto, numero_factura: f.factura, medio: f.medio, fecha: f.fecha, fecha_prevista_pago: f.prevista } }));
+    tercero: f.tercero, concepto: f.concepto, numero_factura: f.factura, medio: f.medio, fecha: f.fecha, fecha_prevista_pago: f.prevista, pendiente_id: f.compra || null } }));
   const [m] = await pedir(sb.from("movimiento").select("aprobacion").eq("id", gid));
-  ir(`#/obra/${id}/gastos`, bien(m?.aprobacion === "pendiente" ? "Gasto guardado. Como llega al umbral, espera la aprobación de dirección antes de pagarse." : "Gasto guardado."));
+  ir(`#/obra/${id}/gastos`, bien((f.compra ? "Gasto guardado y colgado a la compra: la obra confirma cuando llegue." : "Gasto guardado.")
+    + (m?.aprobacion === "pendiente" ? " Como llega al umbral, espera la aprobación de dirección antes de pagarse." : "")));
 };
 async function decidirGasto(el, decision) {
   if (decision === "rechazado" && !confirm("¿Rechazar este gasto? La decisión queda registrada y no se cambia.")) return;
@@ -1514,6 +1539,13 @@ async function decidirGasto(el, decision) {
   navegar();
 }
 acciones.aprobarGasto = el => decidirGasto(el, "aprobado");
+// Abre el formulario del gasto con la compra pedida ya escogida.
+acciones.comprarPedido = el => {
+  const caja = document.getElementById("registrar-gasto"); if (!caja) return;
+  caja.open = true; caja.querySelector("#gk").value = el.dataset.id;
+  const q = caja.querySelector("#gq"); if (!q.value) q.value = el.dataset.titulo;
+  caja.scrollIntoView({ block: "start", behavior: "smooth" }); caja.querySelector("#gc").focus({ preventScroll: true });
+};
 acciones.rechazarGasto = el => decidirGasto(el, "rechazado");
 formularios.pagoGasto = async (f, form) => {
   await pedir(sb.from("movimiento").insert({ proyecto_id: form.dataset.id, centro_costo_id: f.cc, estado: "pago", origen_id: f.raiz, valor: Number(f.valor),
@@ -1535,6 +1567,11 @@ acciones.retirarDocumento = async el => {
   if (!confirm("¿Retirar este documento del índice? El archivo sigue en Drive.")) return;
   const r = await pedir(sb.from("documento_obra").update({ retirado_en: new Date().toISOString() }).eq("id", el.dataset.id).select("id"));
   aviso = r.length ? bien("Documento retirado del índice.") : mal("Lo retira dirección o quien lo puso."); navegar();
+};
+formularios.pedirCompra = async (f, form) => {
+  await pedir(sb.from("pendiente_obra").insert({ proyecto_id: form.dataset.id, tipo: "compra", titulo: f.titulo.trim(), prioridad: f.prioridad,
+    ubicacion: f.ubicacion.trim() || null, responsable_id: f.compra, fecha_compromiso: f.fecha || null, creado_por: yo.persona_id }));
+  ir(`#/obra/${form.dataset.id}/pendientes`, bien("Compra pedida. Cuando la compren, confirme aquí que llegó."));
 };
 formularios.pendiente = async (f, form) => {
   await pedir(sb.from("pendiente_obra").insert({ proyecto_id: form.dataset.id, titulo: f.titulo.trim(), tipo: f.tipo, prioridad: f.prioridad,
