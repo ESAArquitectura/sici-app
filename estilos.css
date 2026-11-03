@@ -401,6 +401,12 @@ a.fila.despliega:hover::after{border-color:var(--tinta)}
 .msj small{display:block;font:600 .58rem var(--ui);letter-spacing:.16em;text-transform:uppercase;color:var(--taupe);margin-bottom:4px;white-space:normal}
 .wa{margin:10px 0 0;padding:12px 0 0;border-top:1px solid var(--linea);font:400 .92rem/1.45 var(--texto);white-space:pre-wrap;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
 .chat-espera{color:var(--taupe);font-size:.88rem;margin:10px 0 0}
+/* los archivos que citó una respuesta: una línea por archivo, con sus enlaces a Drive */
+.citados{list-style:none;margin:10px 0 0;padding:0;white-space:normal}
+.citados li{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;padding:8px 0 0;border-top:1px solid var(--linea);margin-top:8px}
+.citados li span{flex:1 1 100%;font-weight:500;overflow-wrap:anywhere}
+.citados small{flex:1 1 100%;color:var(--taupe);font:400 .8rem/1.35 var(--texto);letter-spacing:0;text-transform:none;margin:0}
+.citados a{font:500 .88rem var(--ui);color:var(--tinta);text-underline-offset:3px}
 /* dictado por voz: mientras escucha, el botón lo dice con el tono tierra, sin parpadeos */
 .btn.oyendo{border-color:var(--critico);color:var(--critico)}
 .dictado-estado{color:var(--taupe);font-size:.86rem;margin:8px 0 0;min-height:1em}

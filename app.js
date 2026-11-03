@@ -1764,31 +1764,73 @@ function chatInforme(o, d) {
   const burbuja = m => m.tipo === "cierre" ? `<div class="bien" role="status">${h(m.contenido)}</div>`
     : m.rol === "residente" ? `<div class="msj residente"><small>${h(m.autor || "Residente")}</small>${h(m.contenido)}</div>`
     : m.tipo === "mensaje" ? `<div class="msj">${m.datos?.nota ? `${h(m.datos.nota)}` : "El mensaje para el grupo:"}<pre class="wa"${m === ultimoMensaje ? ' id="wa-ultimo"' : ""}>${h(m.contenido)}</pre></div>`
-    : `<div class="msj">${h(m.contenido)}</div>`;
+    : `<div class="msj">${h(m.contenido)}${archivosCitados(m.datos?.archivos)}</div>`;
   const otroDia = d.registra ? `<details class="otro-dia"><summary class="enlace">${d.fecha === d.hoy ? "Abrir otro día" : "Volver a hoy u otro día"}</summary>
       <form data-form="diaInforme" data-id="${o.id}"><label for="if">Día del informe</label><input id="if" name="fecha" type="date" max="${d.hoy}" value="${d.fecha}" required>
       <button class="btn claro">Abrir ese día</button></form></details>` : "";
+  // Cuando no se puede escribir en el registro del día (cerrado, domingo o quien no registra), las preguntas
+  // sobre la obra van en la caja de consultas, que no se guarda en la base.
+  const bodega = !escribe && d.obra.carpeta_drive && (d.registra || yo?.es_direccion || yo?.ve_dinero) ? consultaBodega(o) : "";
   if (!ms.length && !escribe) {
-    if (!d.registra) return "";
+    if (!d.registra) return bodega;
     return `<div class="grupo">Informe diario · ${h(dia)}</div>
       <p class="vacio" style="padding:14px 0">${d.es_domingo ? "Los domingos no se labora: no hay informe."
-        : !d.obra.carpeta_drive ? "Para usar el chat del informe, dirección debe pegar la carpeta de Drive de la obra en «Documentos»." : "Este día ya se cerró."}</p>${otroDia}`;
+        : !d.obra.carpeta_drive ? "Para usar el chat del informe, dirección debe pegar la carpeta de Drive de la obra en «Documentos»." : "Este día ya se cerró."}</p>${otroDia}${bodega}`;
   }
   return `<div class="grupo">Informe diario · ${h(dia)}${d.fecha === d.hoy ? "" : ' <span class="g-n">(otro día)</span>'}</div>
-    ${ms.length ? "" : '<p style="color:var(--tinta-3)">Pegue la lista de la Siso (o escriba quiénes llegaron) y lo que pasó hoy. El asistente pregunta lo que falte y arma el mensaje para el grupo de WhatsApp.</p>'}
+    ${ms.length ? "" : '<p style="color:var(--tinta-3)">Pegue la lista de la SST (o escriba o dicte quiénes llegaron) y lo que pasó hoy. El asistente pregunta lo que falte y arma el mensaje para el grupo de WhatsApp. También puede preguntarle por la obra, por ejemplo el valor de un acta o dónde está un plano.</p>'}
     <div class="chat">${ms.map(burbuja).join("")}</div>
     ${err ? `<div class="error" role="alert">${h(err)}</div>` : ""}
     ${escribe && ultimo?.tipo === "mensaje" ? `<div class="par"><button class="btn claro" data-accion="copiarInforme">Copiar para WhatsApp</button>
         <button class="btn" data-accion="informeListo" data-id="${o.id}" data-fecha="${d.fecha}">Listo</button></div>
       <p style="color:var(--taupe);font-size:.86rem">Copie el mensaje, péguelo en el grupo y toque «Listo»: el SICI guarda la bitácora del día en Drive. Si hay que cambiar algo, escríbalo abajo.</p>` : ""}
     ${escribe && ultimo?.rol === "residente" ? `<button class="btn claro" data-accion="informeReintentar" data-id="${o.id}" data-fecha="${d.fecha}">Volver a intentar</button>` : ""}
-    ${escribe ? `<form data-form="informe" data-id="${o.id}" data-fecha="${d.fecha}" data-hay-mensaje="${ultimoMensaje ? "si" : ""}">
+    ${escribe ? `<form data-form="informe" data-id="${o.id}" data-fecha="${d.fecha}" data-hay-mensaje="${ultimo?.tipo === "mensaje" ? "si" : ""}">
         <label for="it">${ms.length ? "Su respuesta" : "Lista y novedades de hoy"}</label>
         <textarea id="it" name="texto" required autocomplete="off" placeholder="${ms.length ? "" : "Llegaron: …\nFaltó: …\nClima: …"}"></textarea>
-        <div class="par">${Reconocer ? '<button type="button" class="btn claro" id="dictar" data-accion="dictar" aria-pressed="false">Dictar</button>' : ""}<button class="btn">Enviar</button></div>
+        <div class="par">${Reconocer ? '<button type="button" class="btn claro" id="dictar" data-accion="dictar" data-caja="it" aria-pressed="false">Dictar</button>' : ""}<button class="btn">Enviar</button></div>
         ${Reconocer ? '<p id="dictado-estado" class="dictado-estado" role="status" aria-live="polite"></p>' : ""}</form>` : ""}
-    <span id="chat-fin"></span>${otroDia}`;
+    <span id="chat-fin"></span>${otroDia}${bodega}`;
 }
+// Los archivos que el asistente leyó para responder, con su enlace a Drive (abre con una cuenta que tenga acceso).
+const DE_DRIVE = /^https:\/\/(drive|docs)\.google\.com\//;
+function archivosCitados(xs) {
+  const ok = (xs || []).filter(x => x && DE_DRIVE.test(x.ver || ""));
+  if (!ok.length) return "";
+  return `<ul class="citados">${ok.map(x => `<li><span>${h(x.nombre)}</span>${x.ruta ? `<small>${h(x.ruta.split("/").slice(0, -1).join(" / "))}</small>` : ""}
+    <a href="${h(x.ver)}" target="_blank" rel="noopener">Abrir</a>${DE_DRIVE.test(x.descargar || "") ? ` <a href="${h(x.descargar)}" target="_blank" rel="noopener">Descargar</a>` : ""}</li>`).join("")}</ul>`;
+}
+// Consultas a la bodega (la carpeta de Drive de la obra) para dirección y el residente, aunque el día esté cerrado.
+// La conversación vive solo en esta pantalla mientras está abierta: no se guarda en la base.
+const charlaBodega = {};    // obra → [{ rol: "persona" | "asistente", texto, archivos }]
+let errorBodega = "", bajarABodega = false;
+function consultaBodega(o) {
+  const ms = charlaBodega[o.id] || [], err = errorBodega; errorBodega = "";
+  if (bajarABodega) { bajarABodega = false; trasPintar = () => document.getElementById("bodega-fin")?.scrollIntoView({ block: "end" }); }
+  return `<div class="grupo">Preguntar por la obra</div>
+    ${ms.length ? "" : '<p style="color:var(--tinta-3)">El asistente busca en la carpeta de Drive de la obra y responde con la fuente. Por ejemplo: «¿Cuánto vale el acta 4?» o «¿Dónde está el plano del sótano?».</p>'}
+    ${ms.length ? `<div class="chat">${ms.map(m => m.rol === "persona" ? `<div class="msj residente">${h(m.texto)}</div>` : `<div class="msj">${h(m.texto)}${archivosCitados(m.archivos)}</div>`).join("")}</div>` : ""}
+    ${err ? `<div class="error" role="alert">${h(err)}</div>` : ""}
+    <form data-form="consultaBodega" data-id="${o.id}">
+      <label for="cb">Su pregunta</label><textarea id="cb" name="texto" required autocomplete="off"></textarea>
+      <div class="par">${Reconocer ? '<button type="button" class="btn claro" id="dictar" data-accion="dictar" data-caja="cb" aria-pressed="false">Dictar</button>' : ""}<button class="btn">Preguntar</button></div>
+      ${Reconocer ? '<p id="dictado-estado" class="dictado-estado" role="status" aria-live="polite"></p>' : ""}</form>
+    ${ms.length ? `<p><button type="button" class="enlace" data-accion="borrarCharla" data-id="${o.id}">Empezar otra consulta</button></p>` : ""}
+    <span id="bodega-fin"></span>`;
+}
+formularios.consultaBodega = async (f, form) => {
+  pararDictado();
+  const id = form.dataset.id, ms = charlaBodega[id] ||= [];
+  ms.push({ rol: "persona", texto: f.texto.trim() });
+  form.insertAdjacentHTML("afterend", '<p class="chat-espera" role="status">El asistente está buscando en la carpeta de la obra. Puede tardar unos segundos.</p>');
+  try {
+    const r = await llamarInforme({ accion: "consulta", proyecto_id: id, historial: ms.map(m => ({ rol: m.rol, texto: m.texto })) });
+    ms.push({ rol: "asistente", texto: r.respuesta.texto, archivos: r.respuesta.archivos });
+  } catch (e) { ms.pop(); errorBodega = `${decir(e)} Su pregunta era: «${f.texto.trim().slice(0, 300)}».`; }
+  bajarABodega = true;
+  navegar();
+};
+acciones.borrarCharla = el => { delete charlaBodega[el.dataset.id]; navegar(); };
 // Dictado por voz: el teléfono escribe en la caja lo que el residente dice, y él lo revisa antes de enviar.
 // Usa el reconocimiento de voz del navegador (Chrome en Android, Safari en iPhone); si no lo hay, el botón
 // no sale y queda el micrófono del teclado. En Android el modo continuo repite frases, así que allá se
@@ -1814,15 +1856,16 @@ function pararDictado(nota = "") {
   if (r) try { r.stop(); } catch { /* ya había parado */ }
   pintarDictado(false, nota);
 }
-acciones.dictar = () => {
+acciones.dictar = el => {
   if (dictado) return pararDictado();
-  const caja = document.getElementById("it");
+  const id = el?.dataset?.caja || "it";   // la caja del informe («it») o la de las consultas («cb»)
+  const caja = document.getElementById(id);
   if (!caja || !Reconocer) return;
   const r = new Reconocer();
   r.lang = "es-CO"; r.interimResults = true; r.continuous = !ANDROID;
   let antes = caja.value;   // lo que ya estaba escrito se respeta; lo dictado va después
   r.onresult = ev => {
-    const c = document.getElementById("it");
+    const c = document.getElementById(id);
     if (!c) return pararDictado();   // se fue de la pantalla
     let dicho = "";
     for (const x of ev.results) dicho += x[0].transcript;
@@ -1831,8 +1874,8 @@ acciones.dictar = () => {
   r.onerror = ev => { if (dictado === r) pararDictado(FALLA_DICTADO[ev.error] || (ev.error === "aborted" ? "" : "El dictado falló. Puede escribir o usar el micrófono del teclado.")); };
   r.onend = () => {
     if (dictado !== r) return;
-    if (ANDROID && document.getElementById("it")) {   // siguiente tramo
-      antes = document.getElementById("it").value;
+    if (ANDROID && document.getElementById(id)) {   // siguiente tramo
+      antes = document.getElementById(id).value;
       try { r.start(); return; } catch { /* no dejó volver a escuchar */ }
     }
     pararDictado();
