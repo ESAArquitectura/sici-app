@@ -391,3 +391,18 @@ a.fila.despliega:hover::after{border-color:var(--tinta)}
 .ver-por button[aria-pressed="true"]{background:var(--tinta);color:var(--papel);border-color:var(--tinta)}
 .ver-por button:focus-visible{outline:2px solid var(--tinta);outline-offset:2px}
 .grupo .g-n{font:inherit;color:var(--taupe);margin-left:6px}
+
+/* El chat del informe diario (Registro en sitio): el asistente en hueso, el residente en línea, sin sombras.
+   Ojo: la burbuja del residente no se llama «yo», que es el botón de las iniciales (40 × 40).
+   El mensaje para WhatsApp va con sus asteriscos tal cual, en texto plano. */
+.chat{display:flex;flex-direction:column;gap:10px;margin:12px 0 4px}
+.msj{max-width:90%;padding:11px 14px;background:var(--hueso);font-size:.95rem;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}
+.msj.residente{align-self:flex-end;background:none;border:1px solid var(--linea)}
+.msj small{display:block;font:600 .58rem var(--ui);letter-spacing:.16em;text-transform:uppercase;color:var(--taupe);margin-bottom:4px;white-space:normal}
+.wa{margin:10px 0 0;padding:12px 0 0;border-top:1px solid var(--linea);font:400 .92rem/1.45 var(--texto);white-space:pre-wrap;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.chat-espera{color:var(--taupe);font-size:.88rem;margin:10px 0 0}
+/* dictado por voz: mientras escucha, el botón lo dice con el tono tierra, sin parpadeos */
+.btn.oyendo{border-color:var(--critico);color:var(--critico)}
+.dictado-estado{color:var(--taupe);font-size:.86rem;margin:8px 0 0;min-height:1em}
+.dictado-estado:empty{display:none}
+.otro-dia{margin-top:6px}

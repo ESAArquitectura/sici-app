@@ -658,8 +658,147 @@ async function vistaVentas() {
     ${otros.length ? `<div class="grupo">Lo del resto del equipo</div>${otros.map(x => fila(x, nombres.get(x.persona_id))).join("")}` : ""}
     <div class="grupo" style="margin-top:34px">El embudo</div>
     ${["diseno", "obra", "peritaje"].map(bloque).join("") || '<p class="vacio">Todavía no hay oportunidades abiertas.</p>'}
+    ${vePauta() ? '<a class="btn claro" href="#/pauta">Cómo va la pauta</a>' : ""}
     ${yo.es_direccion ? '<a class="btn claro" href="#/tarifas">Tarifas de diseño</a>' : ""}
   </main><button class="mas" data-ir="#/contacto-nuevo" aria-label="Nuevo contacto">+</button>` + pie("#/ventas"));
+}
+
+// ---------- pauta (Meta y Google Ads) · P1 ----------
+// Las cifras llegan solas cada mañana desde el computador de mercadeo (esa-meta-ads → tablas pauta_*).
+// La base ya escribe la frase (v_pauta_lectura); aquí solo se decide qué mostrar y en qué orden.
+const vePauta = () => !!yo && (yo.es_direccion || ["socio", "director", "mercadeo", "financiero"].includes(yo.rol));
+const PLATAFORMA = { google_ads: "Google Ads", meta: "Meta (Instagram y Facebook)" };
+const CORTE_WHATSAPP = "2026-10-02";   // desde ese día se miden los botones de WhatsApp de las landings de Google; antes no
+const entero = n => Math.round(Number(n || 0)).toLocaleString("es-CO");
+async function vistaPauta() {
+  if (!vePauta()) return pinta(cabecera("Pauta", { atras: "#/ventas" }) + '<main><p class="vacio">La pauta la ven dirección, mercadeo y finanzas.</p></main>' + pie("#/ventas"));
+  const [frases, meses, cargas] = await Promise.all([
+    pedir(sb.from("v_pauta_lectura").select("*")),
+    pedir(sb.from("v_pauta_mes").select("*").order("mes", { ascending: false })),
+    pedir(sb.from("pauta_carga").select("fuente,hasta,estado,notas,terminado_en").order("terminado_en", { ascending: false }).limit(10)),
+  ]);
+  const lecturaMes = m => `${pesos(m.inversion)} · ${Number(m.clics) === 1 ? "un clic" : entero(m.clics) + " clics"} · ${Number(m.conversaciones) >= 1
+    ? `${uno(Math.round(Number(m.conversaciones)), "una conversación", "conversaciones")} por WhatsApp (${pesos(m.costo_por_conversacion)} cada una)` : "nadie escribió por WhatsApp"}`;
+  const bloque = fuente => {
+    const ms = meses.filter(m => m.fuente === fuente), f = frases.find(x => x.fuente === fuente), k = cargas.find(x => x.fuente === fuente);
+    if (!ms.length) return `<div class="grupo">${h(PLATAFORMA[fuente])}</div><p class="vacio">Todavía no ha llegado la pauta de ${h(PLATAFORMA[fuente])}.</p>`;
+    const act = ms[0];   // el mes más reciente con datos
+    return `<div class="grupo">${h(PLATAFORMA[fuente])}</div>
+      <p class="frase">${h(f ? f.lectura : `Este mes todavía no hay pauta de ${PLATAFORMA[fuente]}; lo último es ${mesLargo(act.mes).toLowerCase()}.`)}</p>
+      ${k && k.estado === "error" ? `<div class="error" role="status">El último envío falló: ${h(k.notas || "sin detalle")}. Se reintenta mañana.</div>` : ""}
+      <div class="cifras">
+        ${cifra(mesLargo(act.mes), pesos(act.inversion), uno(Number(act.dias), "un día con datos", "días con datos"))}
+        ${cifra("Clics", entero(act.clics), act.costo_por_clic != null ? `${pesos(act.costo_por_clic)} cada uno` : "")}
+        ${cifra("Conversaciones por WhatsApp", entero(act.conversaciones), act.costo_por_conversacion != null ? `${pesos(act.costo_por_conversacion)} cada una` : "")}
+        ${cifra("Impresiones", entero(act.impresiones), "veces que se mostró el anuncio")}
+      </div>
+      ${fuente === "google_ads" && act.mes >= CORTE_WHATSAPP.slice(0, 7) + "-01" ? `<p class="nota">Desde el ${fecha(CORTE_WHATSAPP)} se miden los botones de WhatsApp de las landings; antes no se contaban. Por eso ${mesLargo(act.mes).split(" ")[0].toLowerCase()} no se compara con los meses anteriores.</p>` : ""}
+      ${ms.length > 1 ? `<div class="grupo">Mes a mes</div>${ms.slice(1, 7).map(m => `<div class="fila"><b>${h(mesLargo(m.mes))}</b><span>${h(lecturaMes(m))}</span></div>`).join("")}` : ""}`;
+  };
+  const hasta = frases.map(x => x.datos_hasta).filter(Boolean).sort().pop() || meses.map(m => m.hasta).filter(Boolean).sort().pop();
+  const cargado = cargas.find(x => x.estado === "ok")?.terminado_en;
+  pinta(cabecera("Pauta", { sobre: hasta ? `Datos hasta el ${fecha(hasta)}` : "Meta y Google Ads", atras: "#/ventas" }) + `<main>
+    <a class="btn" href="#/pauta/portal/google/tablero">Ver el portal completo: tableros e informes</a>
+    ${bloque("google_ads")}
+    ${bloque("meta")}
+    <p style="color:var(--tinta-3)">Con menos de 7 días o menos de 100 clics en el mes no se opina: la pauta se juzga por clics, costo por clic y conversaciones por WhatsApp.${hasta ? ` Las cifras llegan solas cada mañana desde el computador de mercadeo${cargado ? `; la última vez, el ${momento(cargado)}` : "."}` : ""}</p>
+  </main>` + pie("#/ventas"));
+}
+
+// ---------- el portal de pauta tal cual (tableros e informes), desde el depósito «pauta» · P4 ----------
+// El entorno de medición sube cada mañana el portal (HTML autocontenido, miniaturas, PDF) al depósito
+// privado «pauta». Aquí se muestra tal cual, dentro de un marco, con enlaces firmados que vencen en una hora.
+const PORTAL_FUENTES = [["google", "Google Ads"], ["meta", "Meta"]];
+const portalCache = { rutas: null, firmadas: new Map(), html: new Map() };
+async function portalRutas(prefijo = "") {
+  const { data, error } = await sb.storage.from("pauta").list(prefijo, { limit: 1000 });
+  if (error) throw error;
+  let rutas = [];
+  for (const o of data || []) {
+    const r = prefijo ? `${prefijo}/${o.name}` : o.name;
+    if (o.id === null) rutas = rutas.concat(await portalRutas(r)); else rutas.push(r);
+  }
+  return rutas;
+}
+async function portalFirmar(rutas) {
+  const faltan = rutas.filter(r => !portalCache.firmadas.has(r));
+  if (faltan.length) {
+    const { data, error } = await sb.storage.from("pauta").createSignedUrls(faltan, 3600);
+    if (error) throw error;
+    for (const f of data || []) if (f.signedUrl) portalCache.firmadas.set(f.path, f.signedUrl);
+  }
+  return new Map(rutas.filter(r => portalCache.firmadas.has(r)).map(r => [r, portalCache.firmadas.get(r)]));
+}
+async function portalTablero(fuente, rutas) {
+  const ruta = `tablero/${fuente}/index.html`;
+  if (portalCache.html.has(ruta)) return portalCache.html.get(ruta);
+  const { data, error } = await sb.storage.from("pauta").download(ruta);
+  if (error) throw error;
+  let html = await data.text();
+  // Lo que el tablero referencia por ruta relativa (miniaturas, informes) pasa a enlaces firmados.
+  const propias = rutas.filter(r => r.startsWith(`tablero/${fuente}/`) && r !== ruta || r.startsWith(`informes/${fuente}/`));
+  const firmadas = await portalFirmar(propias);
+  for (const [r, url] of [...firmadas].sort((a, b) => b[0].length - a[0].length)) {
+    const rel = r.startsWith(`tablero/${fuente}/`) ? r.slice(`tablero/${fuente}/`.length) : `../../${r}`;
+    html = html.split(rel).join(url);
+  }
+  html = html.split("../../portal/local/index.html").join("#");   // el enlace «← Portal» del tablero no aplica aquí
+  html = html.replace(/<a\s(?![^>]*\btarget=)/g, '<a target="_blank" rel="noopener" ');   // los informes y publicaciones abren aparte
+  portalCache.html.set(ruta, html);
+  return html;
+}
+async function vistaPautaPortal(fuente = "google", seccion = "tablero") {
+  if (!vePauta()) return pinta(cabecera("Pauta", { atras: "#/ventas" }) + '<main><p class="vacio">La pauta la ven dirección, mercadeo y finanzas.</p></main>' + pie("#/ventas"));
+  if (!PORTAL_FUENTES.some(([k]) => k === fuente)) fuente = "google";
+  if (!["tablero", "informes"].includes(seccion)) seccion = "tablero";
+  const nombre = PORTAL_FUENTES.find(([k]) => k === fuente)[1];
+  const menu = `<nav class="pestanas" aria-label="Fuente"><div>${PORTAL_FUENTES.map(([k, n]) => `<a href="#/pauta/portal/${k}/${seccion}" ${k === fuente ? 'aria-current="page"' : ""}>${n}</a>`).join("")}</div></nav>
+    <nav class="pestanas" aria-label="Vista"><div>${[["tablero", "Tablero vivo"], ["informes", "Informes por fecha"]].map(([k, n]) => `<a href="#/pauta/portal/${fuente}/${k}" ${k === seccion ? 'aria-current="page"' : ""}>${n}</a>`).join("")}</div></nav>`;
+  let cuerpo = "";
+  try {
+    if (!portalCache.rutas) portalCache.rutas = await portalRutas();
+    const rutas = portalCache.rutas;
+    if (!rutas.some(r => r.startsWith(`tablero/${fuente}/`))) {
+      cuerpo = `<p class="vacio">Todavía no ha llegado el tablero de ${h(nombre)}. Llega solo cada mañana desde el computador de mercadeo.</p>`;
+    } else if (seccion === "tablero") {
+      cuerpo = `<div id="marco-pauta" class="vacio" style="height:calc(100vh - 215px)">Abriendo el tablero de ${h(nombre)}…</div>`;
+    } else {
+      const archivos = rutas.filter(r => r.startsWith(`informes/${fuente}/`) && /\.(html|pdf)$/i.test(r));
+      const firmadas = await portalFirmar(archivos);
+      const grupos = new Map();
+      for (const r of archivos) {
+        const partes = r.split("/").slice(2);
+        const etiqueta = partes.length > 1 ? partes[0] : partes[0].replace(/\.(html|pdf)$/i, "");
+        if (!grupos.has(etiqueta)) grupos.set(etiqueta, []);
+        grupos.get(etiqueta).push(r);
+      }
+      const titulo = e => /^\d{4}-\d{2}-\d{2}$/.test(e) ? `Corte del ${fecha(e)}` : /^\d{4}-\d{2}$/.test(e) ? mesLargo(e + "-01") : e === "referencia-historica" ? "Referencia histórica" : e === "semanas" ? "Resúmenes semanales" : e;
+      cuerpo = [...grupos].sort((a, b) => b[0].localeCompare(a[0])).map(([e, rs]) => `<div class="fila"><b>${h(titulo(e))}</b><span>${rs.sort().map(r =>
+        `<a class="doc" href="${h(firmadas.get(r) || "#")}" target="_blank" rel="noopener"><b>${/\.pdf$/i.test(r) ? "PDF" : rs.length > 2 ? h(r.split("/").pop().replace(/\.html$/, "")) : "Ver"}</b></a>`).join(" · ")}</span></div>`).join("")
+        || `<p class="vacio">Todavía no hay informes de ${h(nombre)}.</p>`;
+    }
+  } catch (e) {
+    cuerpo = `<div class="error">${h(decir(e))}</div>`;
+  }
+  const esta = location.hash;   // si la persona cambia de pestaña mientras carga, lo que llegue tarde se descarta
+  pinta(cabecera("Portal de pauta", { sobre: "Tal cual lo ve mercadeo", atras: "#/pauta" }) + menu + `<main style="padding-top:8px">${cuerpo}</main>` + pie("#/ventas"));
+  if (!document.getElementById("marco-pauta")) return;
+  try {
+    const html = await portalTablero(fuente, portalCache.rutas);
+    const lugar = document.getElementById("marco-pauta");
+    if (!lugar || location.hash !== esta) return;
+    // El marco nace ya con su contenido: si se le pone después, el navegador lo anota en el historial
+    // y al salir de la pestaña devuelve a la persona al tablero.
+    const marco = document.createElement("iframe");
+    marco.title = `Tablero de ${nombre}`;
+    marco.setAttribute("sandbox", "allow-scripts allow-popups allow-popups-to-escape-sandbox");
+    marco.style.cssText = "display:block;width:100%;height:calc(100vh - 215px);border:0;background:#F5F5F3";
+    marco.srcdoc = html;
+    lugar.replaceWith(marco);
+  } catch (e) {
+    const lugar = document.getElementById("marco-pauta");
+    if (lugar && location.hash === esta) lugar.outerHTML = `<div class="error">${h(decir(e))}</div>`;
+  }
 }
 
 async function vistaEmbudo(linea, etapa) {
@@ -1488,16 +1627,24 @@ const OBRA = {
       ${cerrados.length ? `<div class="grupo">Cerrados hace poco</div>${cerrados.map(p => `<div class="fila"><b>${h(p.titulo)}</b><span>Lo verificó ${h(quien.get(p.verificado_por) || "alguien")} el ${h(fecha(p.verificado_en))}</span></div>`).join("")}` : ""}`;
   },
 
-  // La bitácora del día: quiénes estaban, en qué frente, qué avanzó, qué pasó.
+  // La bitácora del día: arriba el chat del informe diario (el residente pega la lista y lo que pasó; el
+  // asistente pregunta lo que falta, devuelve el mensaje para WhatsApp y, con «Listo», escribe la bitácora
+  // en Drive). Abajo, la bitácora a mano y los últimos días.
   async sitio(o, registra) {
-    const [dias, faltan] = await Promise.all([
+    const fechaInf = diaInforme[o.id] || hoyIso();
+    const [dias, faltan, inf] = await Promise.all([
       pedir(sb.from("bitacora").select("id,fecha,personal_sitio,frente_trabajo,avance,novedad,clima,registrado_por").eq("proyecto_id", o.id).order("fecha", { ascending: false }).limit(10)),
       pedir(sb.from("v_bitacora_faltante").select("fecha").eq("proyecto_id", o.id).order("fecha", { ascending: false })),
+      // Si la base todavía no tiene el chat (migración informe_diario), la pantalla sigue como antes.
+      pedir(sb.rpc("informe_del_dia", { p_proyecto: o.id, p_fecha: fechaInf })).catch(() => null),
     ]);
     const quien = await nombresDe(dias.map(d => d.registrado_por));
     const hoy = hoyIso(), deHoy = dias.find(d => d.fecha === hoy);
+    const conChat = !!(inf && inf.registra && inf.obra.carpeta_drive);
+    if (bajarAlChat) { bajarAlChat = false; trasPintar = () => document.getElementById("chat-fin")?.scrollIntoView({ block: "end" }); }
     return `${faltan.length ? `<div class="${faltan.length >= 3 ? "error" : "nota"}" role="status">${faltan.length === 1 ? "Falta la bitácora del " + h(fecha(faltan[0].fecha)) : `Faltan ${faltan.length} días de bitácora en el último mes: ${h(lista(faltan.slice(0, 6).map(f => corta(f.fecha))))}${faltan.length > 6 ? "…" : ""}`}.</div>` : ""}
-      ${registra ? `<details ${deHoy ? "" : "open"}><summary class="btn${deHoy ? " claro" : ""}">${deHoy ? "Registrar otro día" : "Bitácora de hoy"}</summary><form data-form="bitacora" data-id="${o.id}">
+      ${inf ? chatInforme(o, inf) : ""}
+      ${registra ? `<details ${deHoy || conChat ? "" : "open"}><summary class="${conChat ? "enlace" : `btn${deHoy ? " claro" : ""}`}">${conChat ? "Escribir la bitácora a mano" : deHoy ? "Registrar otro día" : "Bitácora de hoy"}</summary><form data-form="bitacora" data-id="${o.id}">
           <label for="bd">Día</label><input id="bd" name="fecha" type="date" value="${deHoy ? (faltan[0]?.fecha || "") : hoy}" max="${hoy}" required>
           <div class="dos"><div><label for="bp">Personas en obra</label><input id="bp" name="personal" type="number" min="0" inputmode="numeric" placeholder="0"></div>
             <div><label for="bc">Clima</label><select id="bc" name="clima"><option value="">Sin anotar</option>${CLIMA.map(c => `<option>${c}</option>`).join("")}</select></div></div>
@@ -1590,6 +1737,151 @@ formularios.bitacora = async (f, form) => {
     frente_trabajo: f.frente.trim() || null, avance: f.avance.trim() || null, novedad: f.novedad.trim() || null, clima: f.clima || null, registrado_por: yo.persona_id });
   if (error) throw /duplicate key/i.test(error.message) ? new Error(`Ya hay bitácora del ${fecha(f.fecha)} en esta obra.`) : error;
   ir(`#/obra/${form.dataset.id}/sitio`, bien("Bitácora guardada."));
+};
+
+// ---------- el chat del informe diario ----------
+// Una conversación por obra y día. Las reglas (quién escribe, ni domingo ni por adelantado, el día se cierra
+// con «Listo») las pone la base; Claude y Drive los maneja la función de servidor «informe-diario», que tiene
+// la llave de Claude y la autorización de Drive como secretos: nada de eso pasa por el teléfono.
+const diaInforme = {};      // obra → el día abierto en el chat (por defecto, hoy)
+let bajarAlChat = false;    // después de enviar, la pantalla baja hasta el final de la conversación
+let errorChat = "";         // lo que falló en el último envío, para decirlo junto al chat
+async function llamarInforme(cuerpo) {
+  const { data, error } = await sb.functions.invoke("informe-diario", { body: cuerpo });
+  if (!error) return data;
+  let m = error.message || "";
+  try { const j = await error.context.json(); if (j?.error) m = j.error; } catch { /* sin cuerpo */ }
+  if (error.context?.status === 404 || /not found/i.test(m)) m = "El chat del informe todavía no está instalado en el servidor.";
+  if (/Failed to send a request|Failed to fetch/i.test(m)) m = "No hay conexión. Revise la señal e intente de nuevo.";
+  throw new Error(m);
+}
+function chatInforme(o, d) {
+  const dia = `${titulo(SEMANA[new Date(d.fecha + "T12:00").getDay()])} ${fecha(d.fecha)}`;
+  const ms = d.mensajes, ultimo = ms[ms.length - 1];
+  const escribe = d.registra && !d.cerrado && !d.es_domingo && !!d.obra.carpeta_drive;
+  const ultimoMensaje = [...ms].reverse().find(m => m.tipo === "mensaje");
+  const err = errorChat; errorChat = "";   // el error se dice una vez, junto al chat
+  const burbuja = m => m.tipo === "cierre" ? `<div class="bien" role="status">${h(m.contenido)}</div>`
+    : m.rol === "residente" ? `<div class="msj residente"><small>${h(m.autor || "Residente")}</small>${h(m.contenido)}</div>`
+    : m.tipo === "mensaje" ? `<div class="msj">${m.datos?.nota ? `${h(m.datos.nota)}` : "El mensaje para el grupo:"}<pre class="wa"${m === ultimoMensaje ? ' id="wa-ultimo"' : ""}>${h(m.contenido)}</pre></div>`
+    : `<div class="msj">${h(m.contenido)}</div>`;
+  const otroDia = d.registra ? `<details class="otro-dia"><summary class="enlace">${d.fecha === d.hoy ? "Abrir otro día" : "Volver a hoy u otro día"}</summary>
+      <form data-form="diaInforme" data-id="${o.id}"><label for="if">Día del informe</label><input id="if" name="fecha" type="date" max="${d.hoy}" value="${d.fecha}" required>
+      <button class="btn claro">Abrir ese día</button></form></details>` : "";
+  if (!ms.length && !escribe) {
+    if (!d.registra) return "";
+    return `<div class="grupo">Informe diario · ${h(dia)}</div>
+      <p class="vacio" style="padding:14px 0">${d.es_domingo ? "Los domingos no se labora: no hay informe."
+        : !d.obra.carpeta_drive ? "Para usar el chat del informe, dirección debe pegar la carpeta de Drive de la obra en «Documentos»." : "Este día ya se cerró."}</p>${otroDia}`;
+  }
+  return `<div class="grupo">Informe diario · ${h(dia)}${d.fecha === d.hoy ? "" : ' <span class="g-n">(otro día)</span>'}</div>
+    ${ms.length ? "" : '<p style="color:var(--tinta-3)">Pegue la lista de la Siso (o escriba quiénes llegaron) y lo que pasó hoy. El asistente pregunta lo que falte y arma el mensaje para el grupo de WhatsApp.</p>'}
+    <div class="chat">${ms.map(burbuja).join("")}</div>
+    ${err ? `<div class="error" role="alert">${h(err)}</div>` : ""}
+    ${escribe && ultimo?.tipo === "mensaje" ? `<div class="par"><button class="btn claro" data-accion="copiarInforme">Copiar para WhatsApp</button>
+        <button class="btn" data-accion="informeListo" data-id="${o.id}" data-fecha="${d.fecha}">Listo</button></div>
+      <p style="color:var(--taupe);font-size:.86rem">Copie el mensaje, péguelo en el grupo y toque «Listo»: el SICI guarda la bitácora del día en Drive. Si hay que cambiar algo, escríbalo abajo.</p>` : ""}
+    ${escribe && ultimo?.rol === "residente" ? `<button class="btn claro" data-accion="informeReintentar" data-id="${o.id}" data-fecha="${d.fecha}">Volver a intentar</button>` : ""}
+    ${escribe ? `<form data-form="informe" data-id="${o.id}" data-fecha="${d.fecha}" data-hay-mensaje="${ultimoMensaje ? "si" : ""}">
+        <label for="it">${ms.length ? "Su respuesta" : "Lista y novedades de hoy"}</label>
+        <textarea id="it" name="texto" required autocomplete="off" placeholder="${ms.length ? "" : "Llegaron: …\nFaltó: …\nClima: …"}"></textarea>
+        <div class="par">${Reconocer ? '<button type="button" class="btn claro" id="dictar" data-accion="dictar" aria-pressed="false">Dictar</button>' : ""}<button class="btn">Enviar</button></div>
+        ${Reconocer ? '<p id="dictado-estado" class="dictado-estado" role="status" aria-live="polite"></p>' : ""}</form>` : ""}
+    <span id="chat-fin"></span>${otroDia}`;
+}
+// Dictado por voz: el teléfono escribe en la caja lo que el residente dice, y él lo revisa antes de enviar.
+// Usa el reconocimiento de voz del navegador (Chrome en Android, Safari en iPhone); si no lo hay, el botón
+// no sale y queda el micrófono del teclado. En Android el modo continuo repite frases, así que allá se
+// dicta por tramos y se vuelve a escuchar solo hasta que el residente toque «Detener».
+const Reconocer = window.SpeechRecognition || window.webkitSpeechRecognition;
+const ANDROID = /Android/i.test(navigator.userAgent);
+let dictado = null;   // el reconocimiento en curso
+const unirTexto = (a, b) => !b ? a : !a ? b : a + (/\s$/.test(a) ? "" : " ") + b;
+const FALLA_DICTADO = {
+  "not-allowed": "El teléfono no dio permiso para usar el micrófono. Actívelo en los ajustes del navegador, o use el micrófono del teclado.",
+  "service-not-allowed": "En este teléfono el dictado no funciona desde la aplicación: use el micrófono del teclado.",
+  "audio-capture": "No encontré el micrófono del teléfono.",
+  "network": "El dictado necesita internet. Revise la señal o escriba.",
+  "no-speech": "Dejó de escuchar porque no oyó nada. Toque «Dictar» para seguir.",
+};
+function pintarDictado(oyendo, nota = "") {
+  const b = document.getElementById("dictar"), e = document.getElementById("dictado-estado");
+  if (b) { b.textContent = oyendo ? "Detener" : "Dictar"; b.setAttribute("aria-pressed", String(oyendo)); b.classList.toggle("oyendo", oyendo); }
+  if (e) e.textContent = oyendo ? "Escuchando. Hable claro y toque «Detener» al terminar; luego revise el texto." : nota;
+}
+function pararDictado(nota = "") {
+  const r = dictado; dictado = null;
+  if (r) try { r.stop(); } catch { /* ya había parado */ }
+  pintarDictado(false, nota);
+}
+acciones.dictar = () => {
+  if (dictado) return pararDictado();
+  const caja = document.getElementById("it");
+  if (!caja || !Reconocer) return;
+  const r = new Reconocer();
+  r.lang = "es-CO"; r.interimResults = true; r.continuous = !ANDROID;
+  let antes = caja.value;   // lo que ya estaba escrito se respeta; lo dictado va después
+  r.onresult = ev => {
+    const c = document.getElementById("it");
+    if (!c) return pararDictado();   // se fue de la pantalla
+    let dicho = "";
+    for (const x of ev.results) dicho += x[0].transcript;
+    c.value = unirTexto(antes, dicho.trim());
+  };
+  r.onerror = ev => { if (dictado === r) pararDictado(FALLA_DICTADO[ev.error] || (ev.error === "aborted" ? "" : "El dictado falló. Puede escribir o usar el micrófono del teclado.")); };
+  r.onend = () => {
+    if (dictado !== r) return;
+    if (ANDROID && document.getElementById("it")) {   // siguiente tramo
+      antes = document.getElementById("it").value;
+      try { r.start(); return; } catch { /* no dejó volver a escuchar */ }
+    }
+    pararDictado();
+  };
+  dictado = r;
+  try { r.start(); } catch { dictado = null; return pintarDictado(false, "No pude empezar a escuchar. Intente de nuevo o use el micrófono del teclado."); }
+  pintarDictado(true);
+};
+async function enviarInforme(cuerpo, espera) {
+  pararDictado();
+  errorChat = "";
+  espera?.insertAdjacentHTML("afterend", '<p class="chat-espera" role="status">El asistente está leyendo la bitácora y pensando. Puede tardar unos segundos.</p>');
+  try { await llamarInforme(cuerpo); }
+  catch (e) { errorChat = decir(e); }
+  bajarAlChat = true;
+  navegar();
+}
+formularios.informe = async (f, form) => {
+  // Escribir «Listo» cuando ya está el mensaje es lo mismo que tocar el botón.
+  if (form.dataset.hayMensaje && /^\s*listo[.!]?\s*$/i.test(f.texto)) { pararDictado(); return acciones.informeListo(form); }
+  await enviarInforme({ accion: "mensaje", proyecto_id: form.dataset.id, fecha: form.dataset.fecha, texto: f.texto }, form);
+};
+acciones.informeReintentar = el => enviarInforme({ accion: "mensaje", proyecto_id: el.dataset.id, fecha: el.dataset.fecha }, el);
+acciones.informeListo = async el => {
+  errorChat = "";
+  (el.closest(".par") || el).insertAdjacentHTML("afterend", '<p class="chat-espera" role="status">Guardando la bitácora en Drive. Puede tardar hasta un minuto: no cierre la aplicación.</p>');
+  // Lo que quedó guardado lo dice el chat mismo (el último mensaje del día).
+  try { await llamarInforme({ accion: "listo", proyecto_id: el.dataset.id, fecha: el.dataset.fecha }); }
+  catch (e) { errorChat = decir(e); }
+  bajarAlChat = true;
+  navegar();
+};
+acciones.copiarInforme = async el => {
+  const texto = document.getElementById("wa-ultimo")?.textContent || "";
+  try { await navigator.clipboard.writeText(texto); }
+  catch {   // teléfonos viejos o sin permiso: se copia seleccionando
+    const t = Object.assign(document.createElement("textarea"), { value: texto });
+    t.setAttribute("readonly", ""); t.style.position = "fixed"; t.style.opacity = "0";
+    document.body.appendChild(t); t.select(); t.setSelectionRange(0, texto.length);
+    const ok = document.execCommand("copy"); t.remove();
+    if (!ok) throw new Error("No se pudo copiar: mantenga presionado el mensaje para copiarlo.");
+  }
+  el.textContent = "Copiado"; setTimeout(() => { el.textContent = "Copiar para WhatsApp"; }, 2500);
+};
+formularios.diaInforme = async (f, form) => {
+  const id = form.dataset.id;
+  if (f.fecha) diaInforme[id] = f.fecha === hoyIso() ? undefined : f.fecha;
+  errorChat = "";
+  ir(`#/obra/${id}/sitio`);
 };
 
 // ---------- Drive ----------
@@ -1980,7 +2272,7 @@ async function navegar() {
   if (recuperando) return vistaNuevaClave();
   if (!yo) return vistaSinFicha();
   const [, ruta = "", arg, arg2] = location.hash.split("/");
-  app.classList.toggle("ancho", ruta === "mando");
+  app.classList.toggle("ancho", ruta === "mando" || (ruta === "pauta" && arg === "portal"));
   try {
     if (ruta === "tarea" && arg) await vistaTarea(arg);
     else if (ruta === "nueva") await vistaNueva(arg, arg2);
@@ -1998,6 +2290,8 @@ async function navegar() {
     else if (ruta === "registro") await vistaRegistro();
     else if (ruta === "impacto") await vistaImpacto(arg);
     else if (ruta === "ventas") await vistaVentas();
+    else if (ruta === "pauta" && arg === "portal") await vistaPautaPortal(arg2 || "google", location.hash.split("/")[4] || "tablero");
+    else if (ruta === "pauta") await vistaPauta();
     else if (ruta === "embudo" && arg) await vistaEmbudo(arg, arg2);
     else if (ruta === "oportunidad" && arg) await vistaOportunidad(arg);
     else if (ruta === "reporte" && arg) await vistaReporte(arg);
