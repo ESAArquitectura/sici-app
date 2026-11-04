@@ -1757,7 +1757,10 @@ async function llamarInforme(cuerpo) {
 }
 function chatInforme(o, d) {
   const dia = `${titulo(SEMANA[new Date(d.fecha + "T12:00").getDay()])} ${fecha(d.fecha)}`;
-  const ms = d.mensajes, ultimo = ms[ms.length - 1];
+  // Cerrado el día con «Listo», la conversación no se vuelve a mostrar (pedido de Teo, 03-11): lo que queda
+  // es el folio y el mensaje enviado en Drive. Cada día arranca con el chat vacío, porque la conversación
+  // es por día y la función solo le da a Claude la del día que se está escribiendo.
+  const ms = d.cerrado ? d.mensajes.filter(m => m.tipo === "cierre") : d.mensajes, ultimo = ms[ms.length - 1];
   const escribe = d.registra && !d.cerrado && !d.es_domingo && !!d.obra.carpeta_drive;
   const ultimoMensaje = [...ms].reverse().find(m => m.tipo === "mensaje");
   const err = errorChat; errorChat = "";   // el error se dice una vez, junto al chat
