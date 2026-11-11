@@ -10,6 +10,7 @@ const app = document.getElementById("app");
 let usuario = null;          // la sesión de Supabase
 let yo = null;               // mi ficha y lo que puedo hacer (mi_sesion)
 let aviso = null;            // un mensaje para mostrar una vez arriba de la pantalla
+let sinLeer = 0;             // avisos del perfil que la persona no ha leído (se pide en cada navegación)
 
 // ---------- utilidades ----------
 const h = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -111,7 +112,7 @@ function cabecera(t, { sobre = "", atras = "" } = {}) {
   const ini = yo ? yo.nombre.split(/\s+/).map(x => x[0]).slice(0, 2).join("").toUpperCase() : "";
   return `<header class="cab">${atras ? `<button class="atras" data-ir="${atras}" aria-label="Volver">‹</button>` : ""}
     <div style="flex:1;min-width:0">${sobre ? `<small>${h(sobre)}</small>` : ""}<h1>${h(t)}</h1></div>
-    ${yo && !atras ? `<button class="yo" data-ir="#/yo" aria-label="Mi cuenta">${h(ini)}</button>` : ""}</header>`;
+    ${yo && !atras ? `<button class="yo" data-ir="#/yo" aria-label="Mi cuenta${sinLeer ? ` · ${sinLeer} ${sinLeer === 1 ? "aviso sin leer" : "avisos sin leer"}` : ""}">${h(ini)}${sinLeer ? `<i>${sinLeer > 9 ? "9+" : sinLeer}</i>` : ""}</button>` : ""}</header>`;
 }
 function pie(actual, porRevisar = 0) {
   const manda = yo.asigna || yo.dirige.length;
@@ -119,11 +120,15 @@ function pie(actual, porRevisar = 0) {
   const it = [["#/", "Mi día"], ...(yo.vende ? [["#/ventas", "Ventas"]] : []), ...(yo.revisa.length ? [["#/revisar", "Revisar"]] : []), ["#/proyectos", "Proyectos"],
     ...(yo.obras ? [["#/obras", "Obras"]] : []), ...(yo.obras && manda ? [] : [["#/equipo", "Equipo"]]),
     manda ? ["#/mando", "Mando"] : ["#/impacto", "Impacto"]];   // quien dirige ve el impacto de todos en el centro de mando
-  return `<nav class="pie" aria-label="Secciones"><div>${it.map(([r, n]) =>
-    `<a href="${r}" ${r === actual ? 'aria-current="page"' : ""}>${n}${r === "#/revisar" && porRevisar ? `<i>${porRevisar}</i>` : ""}</a>`).join("")}</div></nav>`;
+  // En el computador la barra pasa a ser un menú a la izquierda, con el logo arriba y «Mi cuenta» abajo (estilos.css).
+  return `<nav class="pie" aria-label="Secciones"><a class="pie-logo" href="#/" aria-label="Mi día"><picture><source srcset="logo-blanco.png" media="(prefers-color-scheme: dark)"><img src="logo.png" width="1000" height="431" alt="ESA Arquitectura"></picture></a><div>${it.map(([r, n]) =>
+    `<a href="${r}" ${r === actual ? 'aria-current="page"' : ""}>${n}${r === "#/revisar" && porRevisar ? `<i>${porRevisar}</i>` : ""}</a>`).join("")}</div>
+    <a class="pie-yo" href="#/yo" ${actual === "#/yo" ? 'aria-current="page"' : ""}>${h(yo.nombre.split(/\s+/)[0])} · Mi cuenta${sinLeer ? `<i aria-label="${sinLeer} sin leer">${sinLeer}</i>` : ""}</a></nav>`;
 }
 function pinta(html) {
   const a = aviso; aviso = null;
+  // Las pantallas sin barra (una tarea, un formulario, Mi cuenta) la llevan igual en el computador, como menú a la izquierda.
+  if (yo && !html.includes('<nav class="pie"')) html += pie("#/" + (location.hash.split("/")[1] || "")).replace('class="pie"', 'class="pie solo-pc"');
   app.innerHTML = html.replace("<main>", `<main>${a ? `<div class="${a.tipo}" role="status">${h(a.texto)}</div>` : ""}`);
   window.scrollTo(0, 0);
 }
@@ -214,6 +219,20 @@ async function vistaDia() {
     yo.vende ? pedir(sb.from("v_ventas_hoy").select("persona_id,urgente")) : [],
     sb.rpc("carga_semanal", { p_semanas: 1 }).then(r => r.data || []),
   ]);
+  // Los avisos sin leer van arriba, y dirección ve cuántos pendientes esperan su aprobación.
+  // Si la base todavía no los tiene, la pantalla sigue como antes.
+  const [alertas, leidas, porAprobar] = await Promise.all([
+    sinLeer ? sb.from("alerta").select("id,titulo,creada_en,pendiente_id").contains("destinatarios", [yo.persona_id]).eq("resuelta", false)
+      .order("creada_en", { ascending: false }).limit(20).then(r => r.data || [], () => []) : [],
+    sinLeer ? sb.from("alerta_lectura").select("alerta_id").then(r => r.data || [], () => []) : [],
+    yo.es_direccion ? sb.from("pendiente_obra").select("id", { count: "exact", head: true }).eq("aprobacion", "por_aprobar").not("estado", "in", "(cerrado,descartado)")
+      .then(r => r.count || 0, () => 0) : 0,
+  ]);
+  const leidaYa = new Set(leidas.map(l => l.alerta_id)), nuevas = alertas.filter(a => !leidaYa.has(a.id));
+  const avisos = nuevas.length ? `<div class="grupo c">Avisos sin leer · ${nuevas.length}</div>${nuevas.slice(0, 3).map(a =>
+      `<button type="button" class="fila aviso nuevo" data-accion="abrirAviso" data-id="${a.id}" data-pendiente="${a.pendiente_id || ""}"><b>${h(a.titulo)}</b><span>${h(momento(a.creada_en))}</span></button>`).join("")}
+    ${nuevas.length > 3 ? `<a class="enlace" href="#/avisos">Ver los ${nuevas.length} avisos</a>` : ""}` : "";
+  const pendientes = `<a class="fila" href="#/pendientes${porAprobar ? "/aprobar" : ""}"><b>Pendientes</b><span>${porAprobar ? `<em>${uno(porAprobar, "Uno espera", "esperan")} su aprobación</em>` : "Crear uno, los míos y los que pedí"}</span></a>`;
   // Para dibujar el plazo hace falta el día en que empezó cada tarea de diseño.
   const ids = dia.filter(t => t.origen === "diseno").map(t => t.id);
   const inicio = new Map(ids.length ? (await pedir(sb.from("tarea_diseno").select("id,fecha_inicio,creada_en").in("id", ids))).map(x => [x.id, x]) : []);
@@ -232,15 +251,15 @@ async function vistaDia() {
   for (const t of dia) por.get(tramo(t)).push(t);
   const lista = TRAMO.filter(([k]) => por.get(k).length).map(([k, nombre, c]) => `<div class="grupo ${c}">${nombre} · ${por.get(k).length}</div>` + por.get(k).map(t => {
     const espera = /^La espera /.test(t.lectura || "") ? `<span class="espera-tag">${h(t.lectura.split(" · ")[0])}</span>` : "";
-    const cuerpo = `<b>${h(t.titulo)}${marca(t.prioridad)}${espera}</b><span>${h(titulo(t.proyecto))}${t.origen === "diseno" ? "" : " · pendiente de obra"}</span>${barraPlazo({ ...t, ...inicio.get(t.id) })}`;
-    return t.origen === "diseno" ? `<a class="fila" href="#/tarea/${t.id}">${cuerpo}</a>` : `<a class="fila" href="#/obra/${t.proyecto_id}/pendientes">${cuerpo}</a>`;
+    const cuerpo = `<b>${h(t.titulo)}${marca(t.prioridad)}${marcaAprobacion(t.aprobacion)}${espera}</b><span>${h(titulo(t.proyecto || "Un proyecto"))}${t.origen === "diseno" ? "" : " · pendiente"}</span>${barraPlazo({ ...t, ...inicio.get(t.id) })}`;
+    return t.origen === "diseno" ? `<a class="fila" href="#/tarea/${t.id}">${cuerpo}</a>` : `<a class="fila" href="#/pendiente/${t.id}">${cuerpo}</a>`;
   }).join("")).join("");
   // Mi semana: cuánto tengo encima y cuántas cosas vencen.
   const mia = carga.find(c => c.persona_id === yo.persona_id && c.semana <= hoyIso());
   const n = k => por.get(k).length;
   const semana = dia.length || mia ? `<section class="semana" aria-label="Mi semana"><div class="grupo" style="margin-top:0">Mi semana</div>${barraCapacidad(mia)}
     <div class="cuenta"><div class="${n("vencidas") ? "c" : ""}"><b>${n("vencidas")}</b><small>Vencidas</small></div><div class="${n("hoy") ? "a" : ""}"><b>${n("hoy")}</b><small>Para hoy</small></div><div><b>${n("semana")}</b><small>Esta semana</small></div></div></section>` : "";
-  pinta(cabecera("Mi día", { sobre: fecha(hoyIso()) }) + `<main>${semana}${tiempo}${venta}${decidir}${lista || (decidir ? "" : '<p class="vacio">Nada pendiente. Cuando le asignen algo, aparece aquí.</p>')}</main>
+  pinta(cabecera("Mi día", { sobre: fecha(hoyIso()) }) + `<main>${avisos}${semana}${tiempo}${pendientes}${venta}${decidir}${lista || (decidir ? "" : '<p class="vacio">Nada pendiente. Cuando le asignen algo, aparece aquí.</p>')}</main>
     <button class="mas" data-ir="#/nueva" aria-label="Nueva tarea">+</button>` + pie("#/", cola.length));
 }
 
@@ -1136,22 +1155,81 @@ document.addEventListener("keydown", e => { if (e.key === "Escape" && arrastre?.
 document.addEventListener("contextmenu", e => { if (arrastre?.toque) e.preventDefault(); });
 
 // ---------- revisar ----------
+let revisarDe = "";   // el proyecto por el que se filtra la cola de revisión ("" = todos)
+acciones.revisarDe = el => { revisarDe = el.dataset.id; navegar(); };
 async function vistaRevisar() {
   const cola = (await pedir(sb.from("v_cola_revision").select("*").order("revision_pedida_en"))).filter(c => !c.revisor_id || c.revisor_id === yo.persona_id);
-  pinta(cabecera("Revisar") + `<main>${cola.map(c => `<a class="fila" href="#/tarea/${c.tarea_id}"><b>${h(c.titulo)}${marca(c.prioridad)}</b>
+  // Un botón por proyecto donde algo espera revisión (pedido de Felipe, 05-11): se ve en qué proyecto impacta cada pendiente.
+  const de = c => c.proyecto_id || c.proyecto;
+  const proyectos = [...new Map(cola.map(c => [de(c), c.proyecto])).entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1])));
+  if (!proyectos.some(([id]) => id === revisarDe)) revisarDe = "";
+  const vista = revisarDe ? cola.filter(c => de(c) === revisarDe) : cola;
+  const filtro = proyectos.length > 1 ? `<div class="ver-por" role="group" aria-label="Ver por proyecto"><span>Proyecto</span>${[["", "Todos", cola.length],
+    ...proyectos.map(([id, n]) => [id, titulo(n), cola.filter(c => de(c) === id).length])].map(([id, n, k]) =>
+      `<button type="button" data-accion="revisarDe" data-id="${id}" aria-pressed="${revisarDe === id}">${h(n)} · ${k}</button>`).join("")}</div>` : "";
+  pinta(cabecera("Revisar") + `<main>${filtro}${vista.map(c => `<a class="fila" href="#/tarea/${c.tarea_id}"><b>${h(c.titulo)}${marca(c.prioridad)}</b>
       <span>${h(titulo(c.proyecto))} · ${c.fuera_de_plazo ? "<em>" : ""}${h(c.lectura)}${c.fuera_de_plazo ? "</em>" : ""}</span></a>`).join("") ||
     '<p class="vacio">Nada espera revisión.</p>'}</main>` + pie("#/revisar", cola.length));
 }
 
 // ---------- proyectos ----------
+// Dos maneras de ver todos los proyectos: la lista de fichas o un cronograma con
+// una barra por proyecto. Cada quien deja la que prefiera en su navegador.
+let proyectosComo = "lista";
+try { if (localStorage.getItem("sici-proyectos-como") === "cronograma") proyectosComo = "cronograma"; } catch (e) {}
+acciones.proyectosComo = el => { proyectosComo = el.dataset.id; try { localStorage.setItem("sici-proyectos-como", proyectosComo); } catch (e) {} navegar(); };
+
+// Una barra por proyecto: va del primer día de trabajo a la última entrega
+// (de sus tareas o de sus fases abiertas). Se llena con lo terminado, se pinta de
+// rojo si tiene algo vencido y marca con una raya la entrega de la fase en curso.
+function cronogramaProyectos(ps, fases, tareas) {
+  const hoy = dia0(hoyIso());
+  const datos = ps.map(p => {
+    const ts = tareas.filter(t => t.proyecto_id === p.id), fs = fases.filter(f => f.proyecto_id === p.id);
+    const fsAbiertas = fs.filter(f => f.estado !== "cerrada" && f.fecha_compromiso);
+    const conFecha = ts.filter(t => t.fecha_compromiso);
+    const inicios = conFecha.map(t => Math.min(dia0(String(t.fecha_inicio || t.creada_en || t.fecha_compromiso).slice(0, 10)), dia0(t.fecha_compromiso)));
+    const fines = [...conFecha.map(t => dia0(t.fecha_compromiso)), ...fsAbiertas.map(f => dia0(f.fecha_compromiso))];
+    if (!fines.length) return { p, sin: true, ts };
+    const a = Math.min(...inicios, ...fines), abiertas = ts.filter(t => t.estado !== "terminada");
+    const vencidas = abiertas.filter(t => plazo(t).k === "c").length + fsAbiertas.filter(f => dia0(f.fecha_compromiso) < hoy).length;
+    const b = Math.max(...fines, vencidas ? hoy : 0);
+    const porVencer = abiertas.filter(t => plazo(t).k === "a").length;
+    const act = fs.find(f => f.estado === "en_curso" || f.estado === "en_revision");
+    const pct = ts.length ? (ts.length - abiertas.length) / ts.length * 100 : 0;
+    return { p, a, b, vencidas, porVencer, act, pct, abiertas, hecho: ts.length && !abiertas.length };
+  });
+  const dibujables = datos.filter(d => !d.sin), sinFecha = datos.filter(d => d.sin);
+  if (!dibujables.length) return '<p class="vacio">Ningún proyecto tiene todavía tareas o fases con fecha para dibujar.</p>';
+  const l0 = dia0(lunesDe(new Date(Math.min(hoy - 14, ...dibujables.map(d => d.a)) * 864e5).toISOString().slice(0, 10)));
+  const n = Math.min(Math.ceil((Math.max(hoy + 27, ...dibujables.map(d => d.b)) - l0 + 1) / 7), 26), fin = l0 + n * 7 - 1;
+  const total = n * 7, x = d => (Math.max(l0, Math.min(d, fin + 1)) - l0) / total * 100;
+  const fila = d => {
+    const k = d.vencidas ? "c" : d.hecho ? "h" : d.porVencer ? "a" : "", izq = x(d.a), der = 100 - x(d.b + 1);
+    const raya = d.act?.fecha_compromiso && dia0(d.act.fecha_compromiso) >= l0 && dia0(d.act.fecha_compromiso) <= fin ? `<s style="left:${x(dia0(d.act.fecha_compromiso) + 1).toFixed(2)}%"></s>` : "";
+    const lectura = [d.act ? "en " + nFase(d.act.fase).toLowerCase() : "", `${d.pct.toFixed(0)} %`,
+      d.vencidas ? uno(d.vencidas, "una vencida", "vencidas") : d.porVencer ? uno(d.porVencer, "una por vencer", "por vencer") : ""].filter(Boolean).join(" · ");
+    return `<a class="cr-t cr-p ${k}" href="#/proyecto/${d.p.id}/cronograma" aria-label="${h(d.p.nombre)}: ${h(lectura)}"><i style="left:${izq.toFixed(2)}%;right:${der.toFixed(2)}%"><b style="width:${d.pct.toFixed(0)}%"></b></i>${raya}
+      <span style="${izq > 55 ? `right:${der.toFixed(2)}%` : `left:${izq.toFixed(2)}%`}"><b>${h(d.p.nombre)}</b> · ${h(lectura)}</span></a>`;
+  };
+  const grupos = [...new Set(dibujables.map(d => d.p.unidad))].map(u => [UNIDAD[u] || u || "Sin línea", dibujables.filter(d => d.p.unidad === u).sort((a, b) => a.a - b.a)]);
+  return `<div class="cr" style="--n:${n}" tabindex="0" role="group" aria-label="Cronograma de los proyectos"><div class="cr-in">
+      <div class="cr-sems">${Array.from({ length: n }, (_, i) => { const s = new Date((l0 + i * 7) * 864e5).toISOString().slice(0, 10); return `<span>${s === lunesDe(hoyIso()) ? "Esta" : corta(s)}</span>`; }).join("")}</div>
+      <div class="cr-fondo">${"<span></span>".repeat(n)}</div>${hoy >= l0 && hoy <= fin ? `<div class="cr-hoy" style="left:${x(hoy + 0.5).toFixed(2)}%"></div>` : ""}
+      ${grupos.map(([g, l]) => `<div class="cr-g"><span>${h(g)}</span></div>${l.map(fila).join("")}`).join("")}</div></div>
+    <div class="cr-ley"><span><i style="background:var(--tinta)"></i>Terminado</span><span><i style="background:var(--alerta)"></i>Algo por vencer</span><span><i style="background:var(--critico)"></i>Algo vencido</span><span><i style="background:var(--ok)"></i>Todo terminado</span><span><i style="width:2px;height:14px;background:var(--tinta)"></i>Entrega de la fase en curso</span></div>
+    ${sinFecha.length ? `<div class="grupo">Sin fechas todavía <small class="g-n">${sinFecha.length}</small></div>${sinFecha.map(d => `<a class="fila" href="#/proyecto/${d.p.id}/ficha"><b>${h(d.p.nombre)}</b><span>${d.ts.length ? uno(d.ts.length, "una tarea", "tareas") + " sin fecha de entrega" : "Sin tareas"} · ponga la fecha de la fase en la ficha</span></a>`).join("")}` : ""}`;
+}
+
 async function vistaProyectos() {
   const ps = await pedir(sb.from("proyecto").select("id,codigo,nombre,tipo,unidad,fase,estado").eq("estado", "activo").order("nombre"));
   const ids = ps.map(p => p.id);
-  const [fases, avance, abiertas] = ids.length ? await Promise.all([
+  const [fases, avance, tareas] = ids.length ? await Promise.all([
     pedir(sb.from("proyecto_fase").select("id,proyecto_id,fase,orden,estado,fecha_compromiso").in("proyecto_id", ids).order("orden")),
     pedir(sb.from("v_fase_avance").select("fase_id,proyecto_id,tareas,terminadas")),
-    pedir(sb.from("tarea_diseno").select("id,proyecto_id,estado,fecha_compromiso").in("proyecto_id", ids).neq("estado", "terminada")),
+    pedir(sb.from("tarea_diseno").select("id,proyecto_id,estado,fecha_inicio,creada_en,fecha_compromiso,terminada_en").in("proyecto_id", ids)),
   ]) : [[], [], []];
+  const abiertas = tareas.filter(t => t.estado !== "terminada");
   const av = new Map(avance.map(a => [a.fase_id, a]));
   const ficha = p => {
     const fs = fases.filter(f => f.proyecto_id === p.id), aa = avance.filter(a => a.proyecto_id === p.id), tot = aa.reduce((n, a) => n + a.tareas, 0), hechas = aa.reduce((n, a) => n + a.terminadas, 0);
@@ -1160,7 +1238,9 @@ async function vistaProyectos() {
     return `<a class="pr" href="#/proyecto/${p.id}"><b>${h(p.nombre)}</b><span>${h(UNIDAD[p.unidad] || p.unidad)}${act ? " · en " + h(nFase(act.fase).toLowerCase()) : ""} · ${ts.length ? uno(ts.length, "una tarea abierta", "tareas abiertas") : "sin tareas abiertas"}${v ? ` · <em>${uno(v, "una vencida", "vencidas")}</em>` : ""}</span>
       ${fs.length ? tiraFases(fs, av) : ""}${tot ? barraAvance(hechas / tot * 100) : ""}</a>`;
   };
-  pinta(cabecera("Proyectos") + `<main>${ps.map(ficha).join("") ||
+  const como = ps.length ? `<div class="ver-por" role="group" aria-label="Ver proyectos como"><span>Ver como</span>${[["lista", "Lista"], ["cronograma", "Cronograma"]].map(([v, n]) =>
+    `<button type="button" data-accion="proyectosComo" data-id="${v}" aria-pressed="${proyectosComo === v}">${n}</button>`).join("")}</div>` : "";
+  pinta(cabecera("Proyectos") + `<main>${como}${(proyectosComo === "cronograma" && ps.length ? cronogramaProyectos(ps, fases, tareas) : ps.map(ficha).join("")) ||
     `<p class="vacio">${yo.es_direccion ? "Todavía no hay proyectos. Abra el primero con el botón de abajo." : "Todavía no hace parte de ningún proyecto."}</p>`}
     ${yo.es_direccion ? '<a class="btn" href="#/nuevo-proyecto">Crear proyecto nuevo</a>' : ""}</main>` + pie("#/proyectos"));
 }
@@ -1193,7 +1273,8 @@ async function vistaProyecto(id, vista = "tablero") {
     <div class="kp"><div><b>${cuenta("asignada")}</b><small>Por empezar</small></div><div><b>${cuenta("en_curso") + cuenta("con_observaciones")}</b><small>En curso</small></div>
       <div><b>${cuenta("en_revision")}</b><small>En revisión</small></div><div class="${vencidas.length ? "c" : ""}"><b>${vencidas.length}</b><small>Vencidas</small></div></div></section>
     <nav class="pestanas p-tabs" aria-label="Vistas del proyecto"><div>${VISTAS.map(([v, n]) => `<a href="#/proyecto/${id}/${v}" ${v === vista ? 'aria-current="page"' : ""}>${n}</a>`).join("")}</div></nav>`;
-  const repartir = yo.registra.includes(id) ? `<a class="btn claro" href="#/nueva/${id}">${dirijo || yo.asigna ? "Repartir tareas de este proyecto" : "Nueva tarea en este proyecto"}</a>` : "";
+  const repartir = (yo.registra.includes(id) ? `<a class="btn claro" href="#/nueva/${id}">${dirijo || yo.asigna ? "Repartir tareas de este proyecto" : "Nueva tarea en este proyecto"}</a>` : "")
+    + `<a class="btn claro" href="#/pendiente-nuevo/${id}">Crear un pendiente en este proyecto</a>`;
 
   let cuerpo = "";
   if (vista === "tablero") {
@@ -1237,6 +1318,7 @@ async function vistaProyecto(id, vista = "tablero") {
     const responden = yo.es_direccion ? [...await asignables(id)].sort((a, b) => a[1].localeCompare(b[1])) : [];   // el equipo que trabaja y dirección
     const fuera = personas.filter(x => !equipo.some(e => e.persona.id === x.id));
     cuerpo = `${p.tipo === "obra" && yo.obras ? `<a class="btn" href="#/obra/${id}">Ver la obra: gastos, flujo y documentos</a>` : ""}
+    <a class="btn claro" href="#/pendiente-nuevo/${id}">Crear un pendiente en este proyecto</a>
     ${fases.length ? `<div class="grupo">Fases</div>${fases.map(f => `<div class="fila"><b>${h(titulo(f.fase.replace(/_/g, " ")))}<span class="marca ${f.estado === "cerrada" ? "o" : f.estado === "pendiente" ? "n" : "a"}">${f.estado === "cerrada" ? "Cerrada" : f.estado === "pendiente" ? "Por abrir" : "En curso"}</span></b>
         <span>${Number(f.horas_cotizadas) ? Number(f.horas_cotizadas) + " horas cotizadas" : "Sin horas cotizadas"}${f.entrega_cliente ? " · " + h(f.entrega_cliente) : ""}${av.get(f.id)?.tareas ? ` · ${av.get(f.id).terminadas} de ${uno(av.get(f.id).tareas, "una tarea terminada", "tareas terminadas")}` : ""}${!yo.es_direccion && f.fecha_compromiso ? " · para el " + h(fecha(f.fecha_compromiso)) : ""}${!yo.es_direccion && f.responsable_id ? " · responde " + h(equipo.find(e => e.persona.id === f.responsable_id)?.persona.nombre || "dirección") : ""}</span>
         ${av.get(f.id)?.tareas ? barraAvance(av.get(f.id).terminadas / av.get(f.id).tareas * 100) : ""}
@@ -1583,7 +1665,7 @@ const OBRA = {
   // Remates, trámites y compras: quien lo hace no es quien lo verifica.
   async pendientes(o, registra) {
     const [abiertos, cerrados, equipo] = await Promise.all([
-      pedir(sb.from("pendiente_obra").select("id,titulo,tipo,prioridad,ubicacion,estado,fecha_compromiso,responsable_id,ejecutor_id,creado_por,movimiento_id").eq("proyecto_id", o.id).not("estado", "in", "(cerrado,descartado)").order("fecha_compromiso", { nullsFirst: false })),
+      pedir(sb.from("pendiente_obra").select("id,titulo,tipo,prioridad,ubicacion,estado,fecha_compromiso,responsable_id,ejecutor_id,creado_por,movimiento_id,aprobacion").eq("proyecto_id", o.id).not("estado", "in", "(cerrado,descartado)").order("fecha_compromiso", { nullsFirst: false })),
       pedir(sb.from("pendiente_obra").select("id,titulo,verificado_en,verificado_por").eq("proyecto_id", o.id).eq("estado", "cerrado").order("verificado_en", { ascending: false }).limit(5)),
       registra ? asignables(o.id) : new Map(),
     ]);
@@ -1612,10 +1694,10 @@ const OBRA = {
         <label for="pr">Responde</label><select id="pr" name="responsable" required>${gente.map(([pid, n]) => `<option value="${pid}" ${pid === yo.persona_id ? "selected" : ""}>${h(n)}</option>`).join("")}</select>
         <label for="pe">Lo hace (si es otra persona)</label><select id="pe" name="ejecutor"><option value="">La misma persona</option>${gente.map(([pid, n]) => `<option value="${pid}">${h(n)}</option>`).join("")}</select>
         <label for="pf">Para cuándo</label><input id="pf" name="fecha" type="date" min="${hoy}">
-        <button class="btn">Crear el pendiente</button></form></details>` : ""}
+        <button class="btn">Crear el pendiente</button></form></details>` : `<a class="btn claro" href="#/pendiente-nuevo/${o.id}">Crear un pendiente en esta obra</a>`}
       <div class="grupo">Abiertos</div>
       ${abiertos.map(p => { const hizo = p.ejecutor_id || p.responsable_id, mio = [p.responsable_id, p.ejecutor_id, p.creado_por].includes(yo.persona_id), compra = p.tipo === "compra";
-        return `<div class="fila"><b>${h(p.titulo)}${marca(p.prioridad)}</b>
+        return `<div class="fila"><b><a class="doc" href="#/pendiente/${p.id}">${h(p.titulo)}</a>${marca(p.prioridad)}${marcaAprobacion(p.aprobacion)}</b>
           <span>${h(TIPO_PEND[p.tipo])}${p.ubicacion ? " · " + h(p.ubicacion) : ""} · responde ${h(quien.get(p.responsable_id) || "alguien")}${p.ejecutor_id ? " · lo hace " + h(quien.get(p.ejecutor_id) || "alguien") : ""}</span>
           <span>${h(compra && p.estado === "por_verificar" ? "Comprada, falta confirmar que llegó" : compra && !p.movimiento_id ? "Pedida, falta comprarla" : ESTADO_PEND[p.estado])}${p.fecha_compromiso ? ` · ${p.fecha_compromiso < hoy ? `<em>era para el ${h(fecha(p.fecha_compromiso))}</em>` : "para el " + h(fecha(p.fecha_compromiso))}` : ""}</span>
           ${p.estado === "por_verificar" ? (hizo !== yo.persona_id && registra ? `<button class="btn claro" data-accion="verificarPendiente" data-id="${p.id}">${compra ? "Llegó a la obra" : "Verifiqué que quedó hecho"}</button>` : "<span>Lo verifica alguien distinto de quien lo hizo.</span>")
@@ -2114,7 +2196,7 @@ async function vistaMando() {
     const ven = abiertas.filter(t => t.proyecto_id === p.id && vence(t)).map(t => ({ t, d: dia0(hoy) - dia0(t.fecha_compromiso) })).sort((a, b) => b.d - a.d);
     return `<a href="#/proyecto/${p.id}"><span class="mx-cab"><b>${h(p.nombre)}</b>${ven.length ? `<span class="marca c">${uno(ven.length, "una vencida", "vencidas")}</span>` : ""}</span>
       ${tot ? `<span class="mx-av${pc >= 100 ? " ok" : ""}" role="img" aria-label="Avance total: ${pc} %"><i><b style="width:${pc}%"></b></i><strong>${pc} %</strong></span>` : '<span class="m-nada">Sin tareas</span>'}
-      ${ven.length ? `<ul class="mx-ven">${ven.slice(0, 3).map(({ t, d }) => `<li><span>${h(t.titulo)}</span><small>${h(nom(t.asignada_a).split(" ")[0])} · ${d === 1 ? "1 día" : d + " días"}</small></li>`).join("")}${ven.length > 3 ? `<li class="mas">y ${ven.length - 3} más</li>` : ""}</ul>` : ""}
+      ${ven.length ? `<ul class="mx-ven">${ven.slice(0, 3).map(({ t, d }) => `<li><span>${h(t.titulo)}</span><small>${h(nom(t.asignada_a).split(" ")[0])} · ${d === 1 ? "1 día" : d + " días"}</small></li>`).join("")}${ven.length > 3 ? `<li class="mx-mas">y ${ven.length - 3} más</li>` : ""}</ul>` : ""}
       ${fs.length ? tiraFases(fs, av) : '<span class="m-nada">Sin fases</span>'}</a>`; }).join("");
   const tablero = proyectos.filter(p => p.tipo !== "obra").map(p => { const fs = fases.filter(f => f.proyecto_id === p.id), act = fs.find(f => f.estado === "en_curso" || f.estado === "en_revision"), ts = abiertas.filter(t => t.proyecto_id === p.id), v = ts.filter(vence).length;
     const eq = accesos.filter(a => a.proyecto_id === p.id && P.has(a.persona_id) && a.papel !== "observa");
@@ -2294,10 +2376,146 @@ async function vistaImpacto(abierto) {
     <p class="nota">Ninguna frase cuenta tareas hechas ni horas trabajadas. Solo cuentan las tareas que le asignó otra persona.</p></main>` + pie("#/impacto"));
 }
 
+// ---------- pendientes de todo el equipo ----------
+// Cualquiera del equipo crea un pendiente, para sí o para otra persona. Dirección
+// (Felipe o Luisa) lo aprueba, pero eso no frena nada: se trabaja desde que nace.
+// Las reglas y los avisos los pone la base (migración pendientes_para_todos).
+const APROBACION = { por_aprobar: ["Por aprobar", "n"], aprobado: ["Aprobado", "o"], rechazado: ["Rechazado", "c"] };
+const marcaAprobacion = a => a === "por_aprobar" ? '<span class="marca n">Por aprobar</span>' : a === "rechazado" ? '<span class="marca c">Rechazado</span>' : "";
+const PESTANAS_PEND = () => [["mios", "Míos"], ["pedi", "Que pedí"], ...(yo.es_direccion ? [["aprobar", "Por aprobar"]] : [])];
+const abiertoPend = p => p.estado !== "cerrado" && p.estado !== "descartado";
+const filaPendiente = (p, quien) => `<a class="fila" href="#/pendiente/${p.id}"><b>${h(p.titulo)}${marca(p.prioridad)}${marcaAprobacion(p.aprobacion)}</b>
+  <span>${h(p.proyecto || "Un proyecto")} · ${h(quien(p))}</span><span>${/atraso/.test(p.lectura || "") ? `<em>${h(p.lectura)}</em>` : h(p.lectura || "")}</span></a>`;
+
+async function vistaPendientes(cual = "mios") {
+  if (!PESTANAS_PEND().some(([k]) => k === cual)) cual = "mios";
+  const v = sb.from("v_pendientes").select("*").order("fecha_compromiso", { nullsFirst: false });
+  const lista = await pedir(cual === "mios" ? v.or(`responsable_id.eq.${yo.persona_id},ejecutor_id.eq.${yo.persona_id}`)
+    : cual === "pedi" ? v.eq("creado_por", yo.persona_id).neq("responsable_id", yo.persona_id)
+    : v.eq("aprobacion", "por_aprobar").neq("estado", "descartado"));
+  const abiertos = lista.filter(abiertoPend), cerrados = lista.filter(p => !abiertoPend(p)).sort((a, b) => String(b.verificado_en || b.aprobado_en || b.creado_en).localeCompare(String(a.verificado_en || a.aprobado_en || a.creado_en)));
+  const deQuien = cual === "mios" ? p => `lo pidió ${p.creado_por === yo.persona_id ? "usted" : p.creador || "alguien"}`
+    : cual === "pedi" ? p => `lo tiene ${p.responsable || "alguien"}`
+    : p => `lo pidió ${p.creador || "alguien"} para ${p.responsable || "alguien"}`;
+  const grupos = cual === "mios" ? [["Por hacer", abiertos.filter(p => p.estado !== "por_verificar")], ["Hechos, falta verificar", abiertos.filter(p => p.estado === "por_verificar")], ["Cerrados hace poco", cerrados.slice(0, 8)]]
+    : cual === "pedi" ? [["Abiertos", abiertos], ["Cerrados o descartados", cerrados.slice(0, 12)]]
+    : [["Esperan su aprobación", lista]];
+  const vacio = { mios: "No tiene pendientes asignados.", pedi: "Todavía no le ha pedido un pendiente a nadie.", aprobar: "Nada espera aprobación." }[cual];
+  pinta(cabecera("Pendientes", { atras: "#/" }) + `<nav class="pestanas" aria-label="Pendientes"><div>${PESTANAS_PEND().map(([k, n]) =>
+      `<a href="#/pendientes/${k}" ${k === cual ? 'aria-current="page"' : ""}>${n}</a>`).join("")}</div></nav>
+    <main><a class="btn" href="#/pendiente-nuevo">Nuevo pendiente</a>
+    ${cual === "aprobar" && lista.length ? '<p class="nota">Aprobar no frena nada: quien lo tiene ya puede trabajarlo. Rechazarlo lo descarta con su motivo.</p>' : ""}
+    ${grupos.filter(([, l]) => l.length).map(([n, l]) => `<div class="grupo">${n} <small class="g-n">${l.length}</small></div>${l.map(p => filaPendiente(p, deQuien)).join("")}`).join("")
+      || `<p class="vacio">${vacio}</p>`}</main>`);
+}
+
+async function vistaPendienteNuevo(proyectoId) {
+  const [proyectos, gente] = await Promise.all([
+    pedir(sb.rpc("proyectos_para_pendiente")),
+    pedir(sb.from("persona").select("id,nombre,rol").eq("es_interno", true).eq("activo", true).neq("rol", "sistema").order("nombre")),
+  ]);
+  const activos = proyectos.filter(p => !p.estado || p.estado === "activo");
+  if (!activos.length) return pinta(cabecera("Nuevo pendiente", { atras: "#/pendientes" }) + '<main><p class="vacio">No tiene proyectos donde crear un pendiente. Dirección lo agrega al equipo desde la ficha del proyecto.</p></main>');
+  const pid = activos.some(p => p.id === proyectoId) ? proyectoId : "";
+  pinta(cabecera("Nuevo pendiente", { atras: "#/pendientes" }) + `<main><form data-form="pendienteNuevo">
+    <label for="nt">Qué hay que hacer</label><input id="nt" name="titulo" required minlength="4" maxlength="200" autocomplete="off" placeholder="Entregar el documento firmado">
+    <label for="nd">Detalle (opcional)</label><textarea id="nd" name="descripcion" maxlength="2000"></textarea>
+    <label for="nq">A quién se le asigna</label><select id="nq" name="responsable" required>${gente.map(x => `<option value="${x.id}" ${x.id === yo.persona_id ? "selected" : ""}>${h(x.id === yo.persona_id ? "Yo · " + x.nombre : x.nombre + " · " + (ROL[x.rol] || x.rol))}</option>`).join("")}</select>
+    <label for="np">Proyecto</label><select id="np" name="proyecto" required>${pid ? "" : '<option value="">Escoja</option>'}${activos.map(p => `<option value="${p.id}" ${p.id === pid ? "selected" : ""}>${h(p.nombre)}</option>`).join("")}</select>
+    <div class="dos"><div><label for="nf">Para cuándo</label><input id="nf" name="fecha" type="date" min="${hoyIso()}"></div>
+      <div><label for="nr">Prioridad</label><select id="nr" name="prioridad">${opciones({ normal: "Normal", alta: "Alta", bloqueante: "Frena a otros" })}</select></div></div>
+    <label for="ny">Tipo</label><select id="ny" name="tipo">${opciones(TIPO_PEND)}</select>
+    <button class="btn">Crear el pendiente</button>
+    <p class="nota">${yo.es_direccion ? "Lo que usted crea queda aprobado de una vez." : "Felipe o Luisa lo aprueban. Mientras tanto, quien lo recibe ya puede trabajarlo."} La persona a quien se lo asigna recibe el aviso en su perfil.</p>
+  </form></main>`);
+}
+formularios.pendienteNuevo = async f => {
+  if (!f.proyecto) throw new Error("Escoja el proyecto del pendiente.");
+  const [p] = await pedir(sb.from("pendiente_obra").insert({ proyecto_id: f.proyecto, titulo: f.titulo.trim(), descripcion: f.descripcion.trim() || null,
+    tipo: f.tipo, prioridad: f.prioridad, responsable_id: f.responsable, fecha_compromiso: f.fecha || null, creado_por: yo.persona_id }).select("id"));
+  const para = f.responsable === yo.persona_id ? "Quedó en su lista." : "A quien lo tiene ya le llegó el aviso.";
+  ir(`#/pendiente/${p.id}`, bien(`Pendiente creado. ${para}${yo.es_direccion ? "" : " Queda por aprobar, y se puede trabajar desde ya."}`));
+};
+
+async function vistaPendiente(id) {
+  const p = await pedir(sb.from("v_pendientes").select("*").eq("id", id).maybeSingle());
+  if (!p) return pinta(cabecera("Pendiente", { atras: "#/pendientes" }) + '<main><p class="vacio">Ese pendiente no existe o no es suyo ni de sus proyectos.</p></main>');
+  const yoId = yo.persona_id, hizo = p.ejecutor_id || p.responsable_id, abierto = abiertoPend(p), compra = p.tipo === "compra";
+  const tengo = p.responsable_id === yoId || p.ejecutor_id === yoId, pedi = p.creado_por === yoId, edita = abierto && (tengo || pedi || yo.es_direccion);
+  const decide = yo.es_direccion && p.aprobacion === "por_aprobar" && p.estado !== "descartado";
+  const gente = edita ? await pedir(sb.from("persona").select("id,nombre").eq("es_interno", true).eq("activo", true).neq("rol", "sistema").order("nombre")) : [];
+  const estado = compra && p.estado === "por_verificar" ? "Comprada, falta confirmar que llegó" : compra && !p.tiene_gasto && abierto ? "Pedida, falta comprarla" : ESTADO_PEND[p.estado];
+  let botones = "";
+  if (abierto && p.estado !== "por_verificar" && !compra && (tengo || yo.es_direccion)) botones = `<button class="btn" data-accion="pendienteHecho" data-id="${p.id}">Ya quedó hecho</button>`;
+  if (p.estado === "por_verificar") botones = hizo !== yoId && (pedi || tengo || yo.es_direccion)
+    ? `<button class="btn" data-accion="verificarPendiente" data-id="${p.id}">${compra ? "Llegó, la recibí" : "Verifiqué que quedó hecho"}</button>`
+    : '<p class="nota">Lo verifica alguien distinto de quien lo hizo: quien lo pidió o dirección.</p>';
+  if (compra && abierto && !p.tiene_gasto) botones = veFinanzas() ? `<a class="btn claro" href="#/obra/${p.proyecto_id}/gastos">Registrar su gasto</a>` : '<p class="nota">Cuando la compren, aquí aparece para confirmar que llegó.</p>';
+  pinta(cabecera(p.titulo, { sobre: p.proyecto || "Pendiente", atras: "#/pendientes" }) + `<main>
+    <p style="color:var(--tinta-3)">${h(TIPO_PEND[p.tipo] || p.tipo)} · ${h(estado)}${p.fecha_compromiso ? ` · para el ${h(fecha(p.fecha_compromiso))}` : " · sin fecha"}${marca(p.prioridad)}</p>
+    ${abierto && /atraso/.test(p.lectura || "") ? `<div class="error">${h(p.lectura)}.</div>` : ""}
+    ${p.aprobacion === "por_aprobar" ? `<div class="nota" role="status"><strong>Por aprobar.</strong> Felipe o Luisa lo revisan. Mientras tanto se puede trabajar igual.</div>`
+      : p.aprobacion === "rechazado" ? `<div class="error"><strong>${h(p.aprobador || "Dirección")} lo rechazó:</strong> ${h(p.aprobacion_comentario || "")}</div>` : ""}
+    ${p.descripcion ? `<div class="grupo">Detalle</div><p>${h(p.descripcion)}</p>` : ""}
+    <div class="grupo">Quién</div><p>Lo pidió ${h(pedi ? "usted" : p.creador || "alguien")} el ${h(fecha(String(p.creado_en).slice(0, 10)))}. Lo tiene ${h(p.responsable_id === yoId ? "usted" : p.responsable || "alguien")}.${p.ejecutor ? ` Lo hace ${h(p.ejecutor)}.` : ""}
+      ${p.aprobacion === "aprobado" && p.aprobado_en ? ` Lo aprobó ${h(p.aprobador || "dirección")} el ${h(fecha(String(p.aprobado_en).slice(0, 10)))}${p.aprobacion_comentario ? `: «${h(p.aprobacion_comentario)}»` : ""}.` : ""}
+      ${p.estado === "cerrado" ? ` Lo verificó ${h(p.verificador || "alguien")} el ${h(fecha(String(p.verificado_en).slice(0, 10)))}.` : ""}
+      ${p.estado === "descartado" && p.aprobacion !== "rechazado" ? ` Se descartó: ${h(p.descartado_porque || "")}.` : ""}</p>
+    ${botones}
+    ${decide ? `<div class="grupo">Su decisión</div><form data-form="decidirPendiente" data-id="${p.id}">
+      <label for="dc">Comentario (obligatorio para rechazar)</label><textarea id="dc" name="comentario" maxlength="2000"></textarea>
+      <div class="par"><button class="btn" name="d" value="aprobado">Aprobar</button><button class="btn claro" name="d" value="rechazado">Rechazar</button></div></form>` : ""}
+    ${edita ? `<details><summary class="enlace">Cambiar el pendiente</summary><form data-form="editarPendiente" data-id="${p.id}">
+      <label for="eq">Lo tiene</label><select id="eq" name="responsable">${gente.map(x => `<option value="${x.id}" ${x.id === p.responsable_id ? "selected" : ""}>${h(x.nombre)}</option>`).join("")}</select>
+      <div class="dos"><div><label for="ef">Para cuándo</label><input id="ef" name="fecha" type="date" value="${h(p.fecha_compromiso || "")}"></div>
+        <div><label for="ep">Prioridad</label><select id="ep" name="prioridad">${opciones({ normal: "Normal", alta: "Alta", bloqueante: "Frena a otros" }, p.prioridad)}</select></div></div>
+      <button class="btn claro">Guardar el cambio</button></form></details>
+      <details><summary class="enlace">Descartarlo</summary><form data-form="descartar" data-id="${p.id}">
+        <label for="dr">Por qué ya no se hace</label><input id="dr" name="razon" required autocomplete="off"><button class="btn peligro">Descartar</button></form></details>` : ""}
+  </main>`);
+}
+formularios.decidirPendiente = async (f, form, boton) => {
+  const d = boton?.value || "aprobado", comentario = f.comentario.trim();
+  if (d === "rechazado" && !comentario) throw new Error("Para rechazarlo escriba el motivo: le llega a quien lo pidió.");
+  if (d === "rechazado" && !confirm("¿Rechazar este pendiente? Queda descartado con su motivo y la decisión no se cambia.")) return;
+  await cambiaPendiente(form.dataset.id, { aprobacion: d, aprobacion_comentario: comentario || null },
+    d === "aprobado" ? "Aprobado. Quien lo pidió recibió el aviso." : "Rechazado y descartado. Quien lo pidió recibió el aviso con el motivo.");
+};
+formularios.editarPendiente = (f, form) => cambiaPendiente(form.dataset.id,
+  { responsable_id: f.responsable, fecha_compromiso: f.fecha || null, prioridad: f.prioridad }, "Cambio guardado.");
+
+// Los avisos del perfil: los sin leer arriba. Al tocar uno queda leído y abre su pendiente.
+async function vistaAvisos() {
+  const [alertas, leidas] = await Promise.all([
+    pedir(sb.from("alerta").select("id,tipo,titulo,detalle,creada_en,resuelta,pendiente_id").contains("destinatarios", [yo.persona_id]).order("creada_en", { ascending: false }).limit(60)),
+    pedir(sb.from("alerta_lectura").select("alerta_id")),
+  ]);
+  const leida = new Set(leidas.map(l => l.alerta_id)), nuevas = alertas.filter(a => !a.resuelta && !leida.has(a.id)), resto = alertas.filter(a => a.resuelta || leida.has(a.id));
+  const fila = (a, nueva) => `<button type="button" class="fila aviso${nueva ? " nuevo" : ""}" data-accion="abrirAviso" data-id="${a.id}" data-pendiente="${a.pendiente_id || ""}" data-leida="${nueva ? "" : "1"}">
+    <b>${h(a.titulo)}</b><span>${h(momento(a.creada_en))}${a.resuelta ? " · ya resuelto" : ""}</span></button>`;
+  pinta(cabecera("Avisos", { atras: "#/yo" }) + `<main>
+    ${nuevas.length > 1 ? `<button class="btn claro" data-accion="leerTodos" data-ids="${nuevas.map(a => a.id).join(",")}">Marcar los ${nuevas.length} como leídos</button>` : ""}
+    ${nuevas.length ? `<div class="grupo c">Sin leer <small class="g-n">${nuevas.length}</small></div>${nuevas.map(a => fila(a, true)).join("")}` : ""}
+    ${resto.length ? `<div class="grupo">Leídos</div>${resto.map(a => fila(a, false)).join("")}` : ""}
+    ${alertas.length ? "" : '<p class="vacio">Todavía no tiene avisos. Cuando alguien le asigne un pendiente, aparece aquí.</p>'}</main>`);
+}
+async function leerAvisos(ids) {
+  if (!ids.length) return;
+  const { error } = await sb.from("alerta_lectura").upsert(ids.map(alerta_id => ({ alerta_id, persona_id: yo.persona_id })), { onConflict: "alerta_id,persona_id", ignoreDuplicates: true });
+  if (error) throw error;
+}
+acciones.abrirAviso = async el => {
+  if (!el.dataset.leida) await leerAvisos([el.dataset.id]);
+  if (el.dataset.pendiente) ir(`#/pendiente/${el.dataset.pendiente}`); else navegar();
+};
+acciones.leerTodos = async el => { await leerAvisos(el.dataset.ids.split(",")); aviso = bien("Listo: todos leídos."); navegar(); };
+
 // ---------- mi cuenta ----------
 function vistaYo() {
   pinta(cabecera(yo.nombre, { sobre: ROL[yo.rol] || yo.rol, atras: "#/" }) + `<main>
     <p style="color:var(--tinta-3)">${h(usuario.email)}</p>
+    <a class="fila" href="#/avisos"><b>Avisos${sinLeer ? ` <span class="marca c">${sinLeer} sin leer</span>` : ""}</b><span>${sinLeer ? "Le asignaron algo o decidieron sobre lo que pidió" : "Nada nuevo"}</span></a>
+    <a class="fila" href="#/pendientes"><b>Pendientes</b><span>Los míos, los que pedí${yo.es_direccion ? " y los que esperan aprobación" : ""}</span></a>
     <picture class="logo" style="margin-top:28px"><source srcset="logo-blanco.png" media="(prefers-color-scheme: dark)"><img src="logo.png" width="1000" height="431" alt="ESA Arquitectura"></picture>
     ${yo.es_direccion ? '<a class="btn" href="#/personas" style="margin-top:28px">Personas del equipo: fichas y accesos</a>' : ""}
     ${yo.asigna || yo.dirige.length ? `<a class="btn claro" href="#/impacto" style="margin-top:${yo.es_direccion ? 14 : 28}px">Mi impacto</a>` : ""}
@@ -2318,7 +2536,9 @@ async function navegar() {
   if (recuperando) return vistaNuevaClave();
   if (!yo) return vistaSinFicha();
   const [, ruta = "", arg, arg2] = location.hash.split("/");
-  app.classList.toggle("ancho", ruta === "mando" || (ruta === "pauta" && arg === "portal"));
+  // El número del perfil. Si la base todavía no tiene los avisos, queda en cero.
+  sinLeer = await sb.rpc("avisos_sin_leer").then(r => r.data || 0, () => 0);
+  app.classList.toggle("ancho", ruta === "mando" || ruta === "equipo" || (ruta === "pauta" && arg === "portal") || (ruta === "proyectos" && proyectosComo === "cronograma"));   // en el computador, la carga del equipo usa todo el ancho
   try {
     if (ruta === "tarea" && arg) await vistaTarea(arg);
     else if (ruta === "nueva") await vistaNueva(arg, arg2);
@@ -2344,6 +2564,10 @@ async function navegar() {
     else if (ruta === "contacto" && arg) await vistaContacto(arg);
     else if (ruta === "contacto-nuevo") await vistaContactoNuevo();
     else if (ruta === "tarifas") await vistaTarifas();
+    else if (ruta === "pendientes") await vistaPendientes(arg);
+    else if (ruta === "pendiente" && arg) await vistaPendiente(arg);
+    else if (ruta === "pendiente-nuevo") await vistaPendienteNuevo(arg);
+    else if (ruta === "avisos") await vistaAvisos();
     else if (ruta === "yo") vistaYo();
     else if (ruta === "clave") vistaNuevaClave();
     else await vistaDia();

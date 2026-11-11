@@ -1,4 +1,5 @@
-/* SICI · ESA Arquitectura. Primero el celular: una columna, botones de 48 puntos. */
+/* SICI · ESA Arquitectura. Primero el celular: una columna, botones de 48 puntos.
+   En el computador (desde 1024 px) el menú pasa a la izquierda y el contenido se abre: ver el final del archivo. */
 :root{
   --tinta:#000; --tinta-3:#3F3E3E; --taupe:#807D74; --papel:#FFF; --hueso:#F1EEEB; --linea:#E2DED8; --linea-2:#EFECE8;
   --critico:#8C3A2B; --critico-f:#F0E3DF; --alerta:#8A6A22; --alerta-f:#F2ECDD; --ok:#4A6B52; --ok-f:#E5EBE5;
@@ -19,6 +20,10 @@ header.cab h1{font:300 1.9rem/1.05 var(--ui);letter-spacing:-.03em;margin:0;flex
 header.cab small{display:block;font:500 .62rem var(--ui);letter-spacing:.2em;text-transform:uppercase;color:var(--taupe);margin-bottom:6px}
 .atras{background:none;border:0;font:400 1.5rem var(--ui);color:var(--tinta);min-width:44px;min-height:44px;margin:0 -10px -8px -12px;cursor:pointer}
 .yo{width:40px;height:40px;background:var(--tinta);color:var(--papel);border:0;font:500 .8rem var(--ui);letter-spacing:.04em;cursor:pointer;flex:none}
+/* Avisos sin leer: el número sobre las iniciales y una marca en cada aviso nuevo. */
+.yo{position:relative} .yo i{position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;padding:0 5px;background:var(--critico);color:var(--papel);font:600 .62rem/18px var(--ui);font-style:normal;letter-spacing:0}
+.fila.aviso{cursor:pointer;color:inherit} .fila.aviso.nuevo b::before{content:"";display:inline-block;width:7px;height:7px;background:var(--critico);margin-right:9px;vertical-align:2px}
+nav.pie a.pie-yo i{position:static;margin-left:10px}
 main{padding:4px 20px 28px;flex:1}
 
 .grupo{font:600 .62rem var(--ui);letter-spacing:.2em;text-transform:uppercase;color:var(--taupe);margin:26px 0 2px}
@@ -278,6 +283,8 @@ nav.pestanas.p-tabs{margin:14px -20px 0}
 .cr-t.r i b{background:var(--taupe)}
 .cr-t span{position:absolute;top:20px;font:400 .74rem/1.3 var(--ui);white-space:nowrap;color:var(--tinta-3)}
 .cr-t.c span{color:var(--critico)}
+.cr-t.cr-p{height:44px} .cr-t.cr-p span b{font-weight:500;color:var(--tinta)} .cr-t.cr-p.c span b{color:var(--critico)}
+.cr-t s{position:absolute;top:2px;height:18px;margin-left:-1px;border-left:2px solid var(--tinta);pointer-events:none}
 .cr-ley{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:.78rem;color:var(--tinta-3);margin-top:10px}
 .cr-ley span{display:inline-flex;align-items:center;gap:6px} .cr-ley i{display:inline-block;width:18px;height:8px}
 
@@ -351,7 +358,7 @@ a.fila.despliega:hover::after{border-color:var(--tinta)}
 .mx-ven li{display:flex;justify-content:space-between;gap:12px;font-size:.8rem;line-height:1.35;padding:2px 0;color:var(--tinta)}
 .mx-ven li span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mx-ven li small{flex:none;color:var(--critico);font-variant-numeric:tabular-nums}
-.mx-ven li.mas{color:var(--tinta-3)}
+.mx-ven li.mx-mas{color:var(--tinta-3)}   /* no se llama «mas»: esa clase es el botón flotante de 58 × 58 */
 
 /* Cada fase lleva su porcentaje a la derecha del nombre. */
 .tf small{display:flex;justify-content:space-between;gap:4px}
@@ -412,3 +419,43 @@ a.fila.despliega:hover::after{border-color:var(--tinta)}
 .dictado-estado{color:var(--taupe);font-size:.86rem;margin:8px 0 0;min-height:1em}
 .dictado-estado:empty{display:none}
 .otro-dia{margin-top:6px}
+
+/* ---------- Auditoría del teléfono (05-11) ----------
+   En iPhone, un campo con letra menor de 16 px hace que la pantalla se acerque sola al tocarlo. */
+@supports (-webkit-touch-callout:none){.m-f input,.m-f select,.m-tt form textarea{font-size:16px}}
+/* Llamar y WhatsApp desde una oportunidad, y los documentos de la obra: con el dedo, 44 puntos de alto. */
+.fila a[href^="tel:"],.fila a[href^="https://wa.me"]{display:inline-flex;align-items:center;min-height:44px;color:var(--tinta);text-underline-offset:3px}
+.fila > a.doc{display:flex;align-items:center;min-height:44px} .fila span a.doc{display:inline-flex;align-items:center;min-height:44px}
+
+/* ---------- El computador ----------
+   Desde 1024 px no se obliga el formato de celular: la barra de abajo pasa a ser un menú fijo a la
+   izquierda (logo arriba, «Mi cuenta» abajo) y el contenido usa el ancho con una medida cómoda de lectura.
+   Las pantallas de tablero (Mando, proyectos, portal de pauta) usan todo el ancho que quede. */
+nav.pie a.pie-logo,nav.pie a.pie-yo{display:none}
+@media (max-width:1023px){nav.pie.solo-pc{display:none}}
+@media (min-width:1024px){
+  #app:has(> nav.pie){max-width:none;margin:0;padding:0 0 0 232px}
+  #app > header.cab,#app > main,#app > nav.pestanas{width:100%;max-width:960px;margin-left:auto;margin-right:auto}
+  #app.ancho > header.cab,#app.ancho > main,#app.ancho > nav.pestanas{max-width:1440px}
+  header.cab{padding:44px 48px 18px} header.cab h1{font-size:2.5rem}
+  .atras{margin-bottom:-6px}
+  main{padding:8px 48px 64px}
+  #app > nav.pestanas div{padding:0 48px} nav.pestanas.p-tabs{margin:14px -48px 0} nav.pestanas.p-tabs div{padding:0 48px}
+  nav.pie{top:0;right:auto;width:232px;border-top:0;border-right:1px solid var(--tinta);padding:36px 0 24px;display:flex;flex-direction:column}
+  nav.pie div{max-width:none;margin:0;flex-direction:column;flex:1}
+  nav.pie a{flex:none;min-height:46px;flex-direction:row;justify-content:flex-start;padding:0 28px;font-size:.7rem;
+    border-top:0;border-left:2px solid transparent;margin:0}
+  nav.pie a:hover{color:var(--tinta)}
+  nav.pie a[aria-current="page"]{border-left-color:var(--tinta)}
+  nav.pie a i{position:static;margin-left:10px}
+  nav.pie a.pie-logo{display:block;padding:0 28px;margin:0 0 34px;border:0;min-height:0}
+  .pie-logo img{display:block;width:128px;height:auto}
+  nav.pie a.pie-yo{display:flex;border-top:1px solid var(--linea);text-transform:none;letter-spacing:0;font:400 .86rem var(--texto)}
+  .mas{right:40px;bottom:40px}
+  .yo{display:none}   /* las iniciales sobran: «Mi cuenta» está en el menú */
+  .g-quien{max-width:calc(100vw - 232px - 96px)}
+  /* Los formularios y botones sueltos no se estiran a todo el ancho: un campo de 900 px no se lee. */
+  main > form,main > .entrada,main > details > form{max-width:640px}
+  main > .btn,main > form > .btn,main > a.btn{max-width:420px}
+  .msj{max-width:70%}
+}
