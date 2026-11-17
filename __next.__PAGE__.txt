@@ -1,0 +1,37 @@
+1:"$Sreact.fragment"
+3:"$Sreact.suspense"
+4:"/sici-app/_next/static/chunks/2ny5hsmknyr7o.js"
+5:"/sici-app/_next/static/chunks/2kiu-h3_qvq83.js"
+6:I[55935,["$4","$5"],"SesionProvider"]
+7:I[25680,["$4","$5"],"Puerta"]
+8:I[39756,["$4","$5"],"default"]
+9:"/sici-app/_next/static/chunks/23nhre_ek1ihc.js"
+a:I[58298,["$4","$5","$9"],"default"]
+b:I[37457,["$4","$5"],"default"]
+c:I[57903,["$4","$5"],"NoEncontrado"]
+10:I[47257,["$4","$5"],"ClientPageRoot"]
+11:"/sici-app/_next/static/chunks/3sy7_q59p7trg.js"
+12:I[52683,["$4","$5","$11"],"default"]
+15:I[97367,["$4","$5"],"OutletBoundary"]
+18:"ViewportBoundary"
+19:I[97367,["$4","$5"],"$18"]
+1a:"MetadataBoundary"
+1b:I[97367,["$4","$5"],"$1a"]
+1c:I[27201,["$4","$5"],"IconMark"]
+:HL["/sici-app/_next/static/chunks/1c5uy6zecpajo.css","style"]
+:HL["/sici-app/_next/static/chunks/42y0y78pkqxgt.css","style"]
+:HL["https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600&family=Work+Sans:wght@400;500&display=swap","style"]
+2:"Esta aplicación necesita JavaScript."
+e:X
+f:[["children",{"s":"__PAGE__","h":160,"d":{"r":["$","$1","c",{"children":[["$","$L10",null,{"Component":"$12","serverProvidedParams":{"searchParams":{},"params":{},"promises":["$@13","$@14"]}}],[["$","script","script-0",{"src":"/sici-app/_next/static/chunks/3sy7_q59p7trg.js","async":true}]],["$","$L15",null,{"children":["$","$3",null,{"name":"Next.MetadataOutlet","children":"$@16"}]}]]}],"p":"$@17","v":null,"s":"$e"}}]]
+0:{"t":{"t":{"s":"","h":80,"d":{"r":["$","$1","c",{"children":[[["$","link","0",{"rel":"stylesheet","href":"/sici-app/_next/static/chunks/1c5uy6zecpajo.css","precedence":"next"}],["$","link","1",{"rel":"stylesheet","href":"/sici-app/_next/static/chunks/42y0y78pkqxgt.css","precedence":"next"}],["$","script","script-0",{"src":"/sici-app/_next/static/chunks/2ny5hsmknyr7o.js","async":true}],["$","script","script-1",{"src":"/sici-app/_next/static/chunks/2kiu-h3_qvq83.js","async":true}]],["$","html",null,{"lang":"es","suppressHydrationWarning":true,"children":[["$","head",null,{"children":[["$","link",null,{"rel":"preconnect","href":"https://fonts.googleapis.com"}],["$","link",null,{"rel":"preconnect","href":"https://fonts.gstatic.com","crossOrigin":""}],["$","link",null,{"rel":"stylesheet","href":"https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600&family=Work+Sans:wght@400;500&display=swap"}]]}],["$","body",null,{"children":[null,["$","noscript",null,{"children":"Esta aplicación necesita JavaScript."}],["$","$3",null,{"fallback":["$","div",null,{"id":"app","children":["$","p",null,{"className":"espera","children":"Abriendo…"}]}],"children":["$","$L6",null,{"children":["$","$L7",null,{"children":["$","$L8",null,{"parallelRouterKey":"children","error":"$a","errorStyles":[],"errorScripts":[["$","script","script-0",{"src":"/sici-app/_next/static/chunks/23nhre_ek1ihc.js","async":true}]],"template":["$","$Lb",null,{}],"notFound":[["$","$Lc",null,{"titulo":"Esta página no existe","frase":"El enlace puede estar incompleto o la pantalla haber cambiado de lugar. Desde Mi día llega a todo lo demás.","volver":{"href":"/","label":"Ir a Mi día"}}],[]]}]}]}]}]]}]]}]]}],"p":"$@d","v":null,"s":"$e"},"c":"$Qf"},"h":{"r":["$","$1","h",{"children":[null,["$","$L19",null,{"children":[["$","meta","0",{"charSet":"utf-8"}],["$","meta","1",{"name":"viewport","content":"width=device-width, initial-scale=1, viewport-fit=cover"}],["$","meta","2",{"name":"theme-color","content":"#000000"}]]}],["$","$L1b",null,{"children":[["$","div",null,{"hidden":true,"children":["$","$3",null,{"name":"Next.Metadata","children":[["$","title","0",{"children":"SICI · ESA Arquitectura"}],["$","meta","1",{"name":"description","content":"Tareas, proyectos y equipo de ESA Arquitectura"}],["$","link","2",{"rel":"manifest","href":"/sici-app/manifest.webmanifest"}],["$","meta","3",{"name":"robots","content":"noindex, nofollow"}],["$","meta","4",{"name":"mobile-web-app-capable","content":"yes"}],["$","meta","5",{"name":"apple-mobile-web-app-title","content":"SICI"}],["$","meta","6",{"name":"apple-mobile-web-app-status-bar-style","content":"default"}],["$","link","7",{"rel":"icon","href":"/sici-app/icono-192.png"}],["$","link","8",{"rel":"apple-touch-icon","href":"/sici-app/icono-180.png"}],["$","$L1c","9",{}]]}]}],null]}],null]}],"p":"$@1d","v":null,"s":"$e"}},"a":"$@1e","u":"$@1f","b":"MWNbL6zl-frq_Wysw7-ND"}
+13:{}
+14:"$f:0:1:d:r:props:children:0:props:serverProvidedParams:params"
+16:null
+e:300
+1f:true
+e:C
+1e:0
+d:"$undefined"
+1d:"$undefined"
+17:"$undefined"
