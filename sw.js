@@ -5,7 +5,7 @@
 //    con cada versión, así que lo guardado nunca queda viejo, y la app abre sin esperar
 //    a descargarlo otra vez.
 // Al publicar una versión nueva, cambie CACHE para que los teléfonos borren lo anterior.
-const CACHE = "sici-next-v3";
+const CACHE = "sici-next-v4";
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", e => e.waitUntil(
   caches.keys().then(k => Promise.all(k.filter(n => n !== CACHE).map(n => caches.delete(n)))).then(() => self.clients.claim())));
