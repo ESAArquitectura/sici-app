@@ -1,6 +1,7 @@
-:HL["/sici-app/_next/static/chunks/0130o2a-ank4x.css","style"]
-:HL["/sici-app/_next/static/chunks/0egbxrh42is_f.css","style"]
+:HL["/sici-app/_next/static/chunks/1hq9xvhx46q_5.css","style"]
+:HL["/sici-app/_next/static/chunks/0e5ddpv02i-ci.css","style"]
+:HL["/sici-app/_next/static/chunks/1w9tt7d0c967o.css","style"]
 :HL["https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600&family=Work+Sans:wght@400;500&display=swap","style"]
 2:[["children",{"s":"__PAGE__","h":160}]]
 1:[["children",{"s":"embudo","h":96,"c":"$Q2"}]]
-0:{"b":"Ab1yCgYKwLIkn_WgddJNj","t":{"t":{"s":"","h":80,"c":"$Q1"}}}
+0:{"b":"pbSQYryXwSoRfr7Uu8acB","t":{"t":{"s":"","h":80,"c":"$Q1"}}}
